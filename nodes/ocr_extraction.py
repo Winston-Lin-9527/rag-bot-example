@@ -70,7 +70,6 @@ def _report(page_num: int, total: int, status: str) -> None:
 
 def ocr_extraction_node(state: ContractState) -> dict:
     log = list(state.get("processing_log", []))
-    print("OCR extraction node invoked. Current state:", state)
 
     # XML / pre-filled text: skip OCR
     if state.get("full_text") or state["file_type"] == "xml":

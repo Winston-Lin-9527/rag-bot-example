@@ -44,5 +44,5 @@ if __name__ == "__main__":
     }
     
     final_state = workflow_graph.invoke(initial_state)
-    print("Final State:", final_state)
-    print(final_state.get("full_text", "No full text extracted."))
+
+    

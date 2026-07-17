@@ -1,4 +1,5 @@
 from typing import Any, Dict, List, Optional, Tuple
+from pprint import pprint
 
 from models.state import ContractState
 from services.llm import LLMService
@@ -109,6 +110,27 @@ def _build_parent_context(chunks: List[Dict]) -> Tuple[str, List[int]]:
     return context, page_numbers
 
 
+def _debug_print_field_retrieval(field: str,
+                                 extracted_value: str,
+                                 stats: Dict[str, Any],
+                                 prompt_log_entry: Dict[str, Any]) -> None:
+    """Pretty-print the retrieved chunks used to extract one field."""
+    debug_payload = {
+        "field": field,
+        "display_name": prompt_log_entry.get("display_name"),
+        "status": prompt_log_entry.get("status", "ok"),
+        "extracted_value": extracted_value,
+        "rag_queries": prompt_log_entry.get("rag_queries", []),
+        "retrieval_stats": stats,
+        "retrieved_chunks": prompt_log_entry.get("top_k_chunks", []),
+    }
+
+    print("\n" + "=" * 100)
+    print(f"RAG DEBUG | {field}")
+    pprint(debug_payload, sort_dicts=False, width=120)
+    print("=" * 100 + "\n")
+
+
 def _extract_field_from_chunks(field: str,
                                store: HybridVectorStore,
                                llm_service: LLMService
@@ -127,7 +149,20 @@ def _extract_field_from_chunks(field: str,
     top_chunks = _retrieve_top_chunks_for_field(field, store)
     
     if not top_chunks:
-        return {}, {}, {"field": field, "status": "no_chunks_found"}
+        stats = {
+            "field": field,
+            "num_chunks": 0,
+            "pages_retrieved": 0,
+            "page_numbers": [],
+        }
+        return {"field": field, "value": ""}, stats, {
+            "attribute": field,
+            "display_name": FIELD_DISPLAY_NAMES.get(field, "Error: no display name"),
+            "function": "_extract_field",
+            "status": "no_chunks_found",
+            "rag_queries": FIELD_QUERIES.get(field, []),
+            "top_k_chunks": [],
+        }
     
     context, page_numbers = _build_parent_context(top_chunks)
 
@@ -137,8 +172,6 @@ def _extract_field_from_chunks(field: str,
         "pages_retrieved": len(page_numbers),
         "page_numbers": page_numbers,
     }
-
-    print(f"for debug, {stats}")
 
     prompt = f"""
             You are an AI assistant tasked with extracting the value of the field '{field}' from the following contract text. \
@@ -156,19 +189,16 @@ def _extract_field_from_chunks(field: str,
     
     json_response, raw_output, in_tok, out_tok = llm_service.generate_json_tracked(prompt) # TODO: structured schema output 
 
-    if not json_response or "value" not in json_response:
-        return {}, stats, {"field": field, "status": "no_value_found"}
-    
-    
     prompt_log_entry = {
         "attribute": field,
         "display_name": FIELD_DISPLAY_NAMES.get(field, "Error: no display name"),
         "function": "_extract_field",
+        "status": "ok" if json_response and "value" in json_response else "no_value_found",
         "rag_queries": FIELD_QUERIES.get(field, []),
         "top_k_chunks": [
             {
-                "text": c["chunk"][:300],
-                "score": round(c.get("score", 0.0), 4),
+                "text": c["chunk"],
+                "rrf_score": round(c.get("rrf_score", 0.0), 4),
                 "page": c["metadata"].get("page", 0) + 1,
                 "faiss_rank": c.get("faiss_rank"),
                 "bm25_rank": c.get("bm25_rank"),
@@ -180,6 +210,9 @@ def _extract_field_from_chunks(field: str,
         "input_tokens": in_tok,
         "output_tokens": out_tok,
     }
+
+    if not json_response or "value" not in json_response:
+        return {"field": field, "value": ""}, stats, prompt_log_entry
 
     return json_response, stats, prompt_log_entry
 
@@ -208,11 +241,13 @@ def field_extraction_node(state: ContractState) -> ContractState:
         extracted[field] = extraction_result.get("value", "")
         all_stats.append(retrieval_stats)
         prompt_logs.append(prompt_log_entry)
+        _debug_print_field_retrieval(field, extracted[field], retrieval_stats, prompt_log_entry)
         
         
-    print(f"for debug, extracted fields: {extracted}")
-    print(f"for debug, all stats: {all_stats}")
-    print(f"for debug, prompt logs: {prompt_logs}")
+    print("\n" + "=" * 100)
+    print("RAG DEBUG | extracted fields summary")
+    pprint(extracted, sort_dicts=False, width=120)
+    print("=" * 100 + "\n")
     
     n_found = sum(1 for v in extracted.values() if v)
     log.append(f"Field extraction completed – {n_found}/{len(EXTRACT_FIELDS)} fields extracted successfully")
