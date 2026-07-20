@@ -5,11 +5,12 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "azure-ai-inference>=1.0.0b9",
+    "chromadb>=1.5.9",
     "dotenv>=0.9.9",
     "faiss-cpu>=1.14.3",
     "imagehash>=4.3.2",
     "langchain>=1.3.13",
+    "langchain-chroma>=1.1.0",
     "langchain-text-splitters>=1.1.2",
     "langgraph>=1.2.9",
     "numpy>=2.5.1",

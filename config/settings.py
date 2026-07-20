@@ -27,16 +27,6 @@ RRF_K = 60 # reciprocal rank fusion parameter
 DPI = 300
 TEMP_DIR = "./tmp/"
 
-EXTRACT_FIELDS = [
-    "invoice_date",
-    "company_name",
-    "due_date",
-    "amount",
-]
-
-FIELD_DISPLAY_NAMES = {
-    "invoice_date": "Invoice Date",
-    "company_name": "Company Name",
-    "amount": "Invoice Amount",
-    "due_date": "Due Date"
-}
+# CHROMA DB configs
+CHROMA_DB_DIR = "./chroma_db"
+CHROMA_COLLECTION_PREFIX = "contract_"

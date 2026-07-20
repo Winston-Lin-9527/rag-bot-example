@@ -1,4 +1,4 @@
-from typing import Dict, TypedDict, List
+from typing import Any, Dict, TypedDict, List
 
 
 class ContractState(TypedDict, total=False):
@@ -18,8 +18,8 @@ class ContractState(TypedDict, total=False):
     
     # Indexing
     chunks: List[str]
-    chunk_metadata: List[Dict[str, str]]  # metadata for each chunk
-    faiss_ready: bool
+    chunk_metadata: List[Dict[str, Any]]  # metadata for each chunk
+    index_ready: bool
     
     # extracted fields
     extracted_fields: Dict[str, str]

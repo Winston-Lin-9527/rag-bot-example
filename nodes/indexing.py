@@ -1,4 +1,5 @@
 import re
+from pathlib import Path
 
 from models.state import ContractState
 from services.vector_store import HybridVectorStore
@@ -8,7 +9,7 @@ from typing import Dict, Tuple, List
 
 from config.settings import CHUNK_SIZE, CHUNK_SIZE_OVERLAP
 
-# Reset per document — no cross-document persistence.
+# persistent DB store
 # needs to be used by query node later, not ideal TODO
 _session_store: HybridVectorStore | None = None
 
@@ -82,8 +83,8 @@ def indexing_node(state: ContractState) -> ContractState:
         
         metadata = {
             "chunk_index": i,
-            "page_number": str(page_number),
-            "page_numbers": [str(p) for p in page_numbers], # not used yet, TODO
+            "page_number": page_number,
+            "page_numbers": ",".join(str(p) for p in page_numbers),
             "source_path": source_path,
             "page_text": raw_text_by_page.get(page_number, "") # very inefficient, TODO
         }
@@ -91,14 +92,14 @@ def indexing_node(state: ContractState) -> ContractState:
 
     # create the session store and add the chunks with metadata
     global _session_store
-    _session_store = HybridVectorStore()
+    _session_store = HybridVectorStore(collection_name=Path(source_path).stem)
     _session_store.add_documents(chunks, chunk_metadata)
     
     log.append("Indexing completed")
     return {**state,
             "chunks": chunks,
             "chunk_metadata": chunk_metadata,
-            "faiss_ready": True,
+            "index_ready": True,
             "current_step": "completed",
             "processing_log": log
     }

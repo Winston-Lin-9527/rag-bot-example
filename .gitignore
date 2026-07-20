@@ -10,3 +10,5 @@ wheels/
 .venv
 
 tmp/
+chroma_db/
+chroma/
