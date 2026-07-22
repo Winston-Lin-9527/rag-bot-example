@@ -1,5 +1,7 @@
-from typing import Dict
-
+import json
+from pathlib import Path
+from typing import Dict, Tuple
+from utils.hashes import compute_file_sha256
 from paddleocr import PaddleOCR
 
 from models.state import ContractState
@@ -9,6 +11,8 @@ from utils import progress
 
 # Lazy-initialised singleton so the model loads once per process
 _ocr_engine: PaddleOCR | None = None
+_OCR_CACHE_VERSION = "ocr-v1"
+_OCR_CACHE_DIR = Path("./ocr_cache")
 
 
 def _get_ocr() -> PaddleOCR:
@@ -62,6 +66,57 @@ def _vision_extract(llm: LLMService, image_path: str) -> str:
     return llm.generate(prompt, images=[image_path])
 
 
+def _cache_path(file_hash: str) -> Path:
+    return _OCR_CACHE_DIR / f"{_OCR_CACHE_VERSION}_{file_hash}.json"
+
+
+def _load_ocr_cache(file_path: str) -> Tuple[Dict[int, str], str] | None:
+    try:
+        file_hash = compute_file_sha256(file_path)
+        cache_file = _cache_path(file_hash)
+        
+        if not cache_file.exists():
+            return None
+
+        data = json.loads(cache_file.read_text(encoding="utf-8"))
+        if (
+            data.get("cache_version") != _OCR_CACHE_VERSION
+            or data.get("file_sha256") != file_hash
+        ):
+            return None
+
+        raw_text_by_page = {
+            int(page): str(text)
+            for page, text in data.get("raw_text_by_page", {}).items()
+        }
+        full_text = str(data.get("full_text", ""))
+        if not raw_text_by_page and not full_text:
+            return None
+        return raw_text_by_page, full_text
+    except Exception:
+        return None
+
+
+def _save_ocr_cache(file_path: str, raw_text_by_page: Dict[int, str], full_text: str) -> None:
+    try:
+        file_hash = compute_file_sha256(file_path)
+        _OCR_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        _cache_path(file_hash).write_text(
+            json.dumps(
+                {
+                    "cache_version": _OCR_CACHE_VERSION,
+                    "file_sha256": file_hash,
+                    "raw_text_by_page": raw_text_by_page,
+                    "full_text": full_text,
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
+
+
 def _report(page_num: int, total: int, status: str) -> None:
     msg = f"[OCR] Page {page_num + 1}/{total}: {status}"
     print(msg, flush=True)
@@ -75,6 +130,18 @@ def ocr_extraction_node(state: ContractState) -> dict:
     if state.get("full_text") or state["file_type"] == "xml":
         log.append("OCR skipped – text already available")
         return {**state, "processing_log": log, "current_step": "indexing"}
+
+    cached = _load_ocr_cache(state["file_path"])
+    if cached is not None:
+        raw_text_by_page, full_text = cached
+        log.append(f"OCR cache hit: {len(raw_text_by_page)} pages → {len(full_text)} chars")
+        return {
+            **state,
+            "raw_text_by_page": raw_text_by_page,
+            "full_text": full_text,
+            "processing_log": log,
+            "current_step": "indexing",
+        }
 
     llm = LLMService()
     raw_text_by_page: Dict[int, str] = {}
@@ -115,6 +182,7 @@ def ocr_extraction_node(state: ContractState) -> dict:
     )
 
     log.append(f"OCR complete: {len(raw_text_by_page)} pages → {len(full_text)} chars")
+    _save_ocr_cache(state["file_path"], raw_text_by_page, full_text)
     return {
         **state,
         "raw_text_by_page": raw_text_by_page,
