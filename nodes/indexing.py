@@ -1,3 +1,4 @@
+import hashlib
 import re
 from pathlib import Path
 
@@ -20,6 +21,11 @@ def get_session_store() -> HybridVectorStore:
 
 def _normalize_text(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip().lower()
+
+
+def _document_hash(text: str) -> str:
+    fingerprint_input = f"chunk_size={CHUNK_SIZE};chunk_overlap={CHUNK_SIZE_OVERLAP};{text}"
+    return hashlib.sha256(fingerprint_input.encode("utf-8")).hexdigest()
 
 
 def find_page_numbers_for_chunk(chunk: str, raw_text_by_page: Dict[int, str]) -> Tuple[int, List[int]]:
@@ -93,9 +99,9 @@ def indexing_node(state: ContractState) -> ContractState:
     # create the session store and add the chunks with metadata
     global _session_store
     _session_store = HybridVectorStore(collection_name=Path(source_path).stem)
-    _session_store.add_documents(chunks, chunk_metadata)
+    was_indexed = _session_store.add_document(chunks, chunk_metadata, _document_hash(text))
     
-    log.append("Indexing completed")
+    log.append("Indexing completed" if was_indexed else "Indexing skipped – document already indexed")
     return {**state,
             "chunks": chunks,
             "chunk_metadata": chunk_metadata,

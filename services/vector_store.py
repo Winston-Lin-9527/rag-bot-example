@@ -6,7 +6,6 @@ from services.embeddings import EmbeddingService
 from rank_bm25 import BM25Okapi
 from chromadb import GetResult, PersistentClient, Documents, EmbeddingFunction, Embeddings
 
-
 # a thin adapter that translates our generic embedding capability into the shape one specific consumer (Chroma) expects.
 class _ChromaEmbeddingAdapter(EmbeddingFunction):
     def __init__(self, embedding_service: EmbeddingService):
@@ -59,19 +58,59 @@ class HybridVectorStore:
             self._bm25 = BM25Okapi(tokenized_corpus)
         else:
             self._bm25 = None
+    
+    
+    def _existing_document_hashes(self) -> set[str]:
+        """Return a set of unique document hashes from the metadata."""
+        return {
+            str(meta.get("document_hash"))
+            for meta in self.metadata
+            if meta.get("document_hash")
+        }
+    
+    def add_document(
+        self,
+        chunks: List[str],
+        metadata: List[Dict[str, Any]],
+        document_hash: str,
+    ) -> bool:
+        """Index a document by splitting it into chunks, generating embeddings, and storing them in the vector store.
+        """
+        existing_hashes = self._existing_document_hashes()
         
+        # Same document version is already indexed, so avoid re-embedding and upserting.
+        if existing_hashes == {document_hash}:
+            return False # just skip
         
-    def add_documents(self, chunks: List[str], metadata: List[Dict[str, Any]]):
+        # Any existing chunks with a different or missing hash belong to an older index version.
+        if self.chunks:
+            self.reset()
+        
+        self._index_document(chunks, metadata, document_hash)
+        
+        return True
+    
+    
+    def _index_document(
+            self,
+            chunks: List[str],
+            metadata: List[Dict[str, Any]],
+            document_hash: str
+        ) -> None:   
+        """internal method
+        """
         if len(chunks) != len(metadata):
             raise ValueError("chunks and metadata must have the same length")
+        
+        if not document_hash:
+            raise ValueError("document_hash must be provided to ensure unique chunk IDs")
 
-        start_index = len(self.chunks) # current chunk index to start the adding from
-        ids = [f"chunk_{start_index + i}" for i in range(len(chunks))]
+        ids = [f"{document_hash}:chunk_{i}" for i in range(len(chunks))]
         
         # TODO: technically i don't need to call encode here? because the Chroma collection will call it again when we upsert? cuz i gave it embedding_function at chrome collection init
         embeddings = self._embedding_service.encode(chunks).tolist()
         metadatas = [
-            {**meta, "chunk_index": start_index + i} for i, meta in enumerate(metadata)
+            {**meta, "chunk_index": i, "document_hash": document_hash} for i, meta in enumerate(metadata)
         ]
         
         # self._index.add(embeddings)
@@ -82,8 +121,8 @@ class HybridVectorStore:
             metadatas=metadatas
         )
         
-        self.chunks.extend(chunks)
-        self.metadata.extend(metadata)
+        self.chunks = list(chunks)
+        self.metadata = metadatas
         self._rebuild_bm25()
     
     
@@ -127,7 +166,7 @@ class HybridVectorStore:
         distances = results.get("distances")[0]
         # Chroma returns results already sorted by distance(best-first), so rank = enumeration index
         dense_ranks: Dict[int, int] = {
-            int(meta.get("chunk_index", -1)): rank # chunk index was created at upsert time, refer to add_documents()
+            int(meta.get("chunk_index", -1)): rank # chunk index was created at upsert time, refer to add_document()
             for rank, (meta, _) in enumerate(zip(metas, distances)) # distance unused, but we could use it for scoring if we wanted to
             if meta.get("chunk_index", -1) >= 0
         }
