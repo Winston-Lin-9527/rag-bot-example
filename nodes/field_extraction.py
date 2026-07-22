@@ -4,7 +4,7 @@ from pprint import pprint
 from models.state import ContractState
 from services.llm import LLMService
 from services.vector_store import HybridVectorStore
-from config.settings import TOP_K, EXTRACT_FIELDS, FIELD_DISPLAY_NAMES
+from config.settings import TOP_K
 
 
 EXTRACT_FIELDS = [
@@ -13,6 +13,11 @@ EXTRACT_FIELDS = [
     # "due_date",
     # "amount",
 ]
+
+FIELD_DISPLAY_NAMES = {
+    "notice_period": "Notice Period",
+    "time_of_service": "Time of Service",
+}
 
 FIELD_QUERIES: Dict[str, List[str]] = {
     "notice_period": [
@@ -45,6 +50,14 @@ PAGE_0_ANCHOR_FIELDS = {
 TOP_K_OVERRIDE: Dict[str, int] = {
     # "Price": 20, # if price is a field, we want more chunks to be retrieved for better recall, maybe because price can be mentioned in way more many places in the contract
 }
+
+
+def _metadata_page_number(metadata: Dict[str, Any]) -> int:
+    raw_page = metadata.get("page_number", 0)
+    try:
+        return int(raw_page)
+    except (TypeError, ValueError):
+        return 0
 
 def _retrieve_top_chunks_for_field(field: str, store: HybridVectorStore) -> List[Dict[str, Any]]:
     
@@ -87,8 +100,8 @@ def _build_parent_context(chunks: List[Dict]) -> Tuple[str, List[int]]:
     page_texts: Dict[int, str] = {}
 
     for r in chunks:
-        pg = r["metadata"].get("page", 0)
-        score = r.get("score", 0.0)
+        pg = _metadata_page_number(r["metadata"])
+        score = r.get("rrf_score", 0.0)
         if score > page_best_score.get(pg, -1.0):
             page_best_score[pg] = score
         if pg not in page_texts:
@@ -199,8 +212,8 @@ def _extract_field_from_chunks(field: str,
             {
                 "text": c["chunk"],
                 "rrf_score": round(c.get("rrf_score", 0.0), 4),
-                "page": c["metadata"].get("page", 0) + 1,
-                "faiss_rank": c.get("faiss_rank"),
+                "page_number": _metadata_page_number(c["metadata"]),
+                "dense_rank": c.get("dense_rank"),
                 "bm25_rank": c.get("bm25_rank"),
             }
             for c in top_chunks

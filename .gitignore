@@ -10,3 +10,6 @@ wheels/
 .venv
 
 tmp/
+ocr_cache/
+chroma_db/
+chroma/
