@@ -15,8 +15,8 @@ from config.settings import CHUNK_SIZE, CHUNK_SIZE_OVERLAP
 _session_store: HybridVectorStore | None = None
 
 
-def get_session_store() -> HybridVectorStore:
-    return _session_store  # type: ignore[return-value]
+def get_session_store() -> HybridVectorStore | None:
+    return _session_store
 
 
 def _normalize_text(text: str) -> str:

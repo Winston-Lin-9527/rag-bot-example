@@ -1,1 +1,5 @@
 Minor: metadata={"hnsw:space": "cosine"} is honored only on creation. If the collection already exists with the default L2, this line is silently ignored. Fine, just be aware.
+
+rag.py still creates a new store in every ask(). not efficient.
+DirectRagService should cache stores
+

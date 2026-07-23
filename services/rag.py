@@ -7,6 +7,9 @@ from models.chat_state import Citation, RAGAnswer, RetrievedEvidence
 from services.llm import LLMService
 from services.vector_store import HybridVectorStore
 
+"""
+    query only, not indexing. This service is used by the chat graph and the CLI query mode
+"""
 
 class DirectRAGService:
     def __init__(

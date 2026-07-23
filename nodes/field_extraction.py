@@ -1,10 +1,13 @@
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 from pprint import pprint
 
 from models.ingest_state import IngestState
+from nodes.indexing import get_session_store
 from services.llm import LLMService
 from services.vector_store import HybridVectorStore
 from config.settings import TOP_K
+
+from langchain_core.runnables import RunnableConfig
 
 
 EXTRACT_FIELDS = [
@@ -232,12 +235,13 @@ def _extract_field_from_chunks(field: str,
 
 
 
-def field_extraction_node(state: IngestState) -> IngestState:
-    from nodes.indexing import get_session_store 
+def field_extraction_node(state: IngestState, config: RunnableConfig) -> IngestState:
     
     log = list(state.get("processing_log", []))
-    store = get_session_store()
-    llm = LLMService() # new instance, TODO: consider passing in a shared instance if needed
+    llm_service = (config.get("configurable") or {}).get("llm_service")
+    if not llm_service:
+        raise ValueError("llm_service must be provided in graph config")  
+    
     extracted: Dict[str, str] = {} # field_name -> extracted value
     all_stats: List[Dict[str, Any]] = [] # field_name -> stats
     prompt_logs: List[Dict[str, Any]] = [] # field_name -> prompt log entry
@@ -245,10 +249,14 @@ def field_extraction_node(state: IngestState) -> IngestState:
     if not state.get("chunks") or not state.get("chunk_metadata"):
         log.append("Field extraction skipped – no chunks available")
         return {**state, "processing_log": log, "current_step": "completed"}
+
+    store = get_session_store()
+    if store is None:
+        raise ValueError("field extraction requires indexed chunks in the session store")
     
     # start extraction for each field
     for field in EXTRACT_FIELDS:
-        extraction_result, retrieval_stats, prompt_log_entry = _extract_field_from_chunks(field, store, llm)
+        extraction_result, retrieval_stats, prompt_log_entry = _extract_field_from_chunks(field, store, llm_service)
         assert extraction_result['field'] == field, f"Field mismatch: expected {field}, got {extraction_result.get('field')}"
         
         extracted[field] = extraction_result.get("value", "")

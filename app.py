@@ -6,6 +6,8 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from services.llm import LLMService
+
 
 EXIT_COMMANDS = {"/exit", "/quit", "exit", "quit"}
 IMAGE_SUFFIXES = {".bmp", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}
@@ -74,6 +76,7 @@ def build_parser() -> argparse.ArgumentParser:
     ingest_parser = subparsers.add_parser("ingest", help="OCR, extract, and index a contract file.")
     ingest_parser.add_argument("file_path", help="Path to a PDF, XML, or image contract file.")
     ingest_parser.add_argument("--file-type", choices=("pdf", "xml", "image"), help="Override file type inference.")
+    ingest_parser.add_argument("--model", help="Override the configured OpenAI model for field extraction.")
 
     query_parser = subparsers.add_parser("query", help="Chat with an indexed contract collection.")
     query_parser.add_argument("collection_name", help="Unprefixed Chroma collection name, usually the indexed file stem.")
@@ -100,8 +103,12 @@ def run_ingest(args: argparse.Namespace) -> None:
         "current_step": "preprocess",
         "processing_log": [],
     }
+    llm_service = LLMService(model=args.model)
+    config = {"configurable": {
+        "llm_service": llm_service
+    }}
 
-    final_state = ingest_workflow_graph.invoke(initial_state)
+    final_state = ingest_workflow_graph.invoke(initial_state, config=config)
 
     for log_entry in final_state.get("processing_log", []):
         print(log_entry)
@@ -170,4 +177,3 @@ def main(argv: Sequence[str] | None = None) -> None:
 
 if __name__ == "__main__":
     main()
-

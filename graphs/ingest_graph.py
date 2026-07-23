@@ -8,19 +8,20 @@ from nodes.preprocessing import preprocess_node
 
 
 def build_graph():
-    g = StateGraph(IngestState)
+    graph_builder = StateGraph(IngestState)
     
-    g.add_node("preprocess", preprocess_node)
-    g.add_node("ocr_extraction", ocr_extraction_node)
-    g.add_node("indexing", indexing_node)
-    g.add_node("field_extraction", field_extraction_node)
+    graph_builder.add_node("preprocess", preprocess_node)
+    graph_builder.add_node("ocr_extraction", ocr_extraction_node)
+    graph_builder.add_node("indexing", indexing_node)
+    # graph_builder.add_node("field_extraction", field_extraction_node)
     
-    g.set_entry_point("preprocess")
-    g.add_edge("preprocess", "ocr_extraction")
-    g.add_edge("ocr_extraction", "indexing")
-    g.add_edge("indexing", "field_extraction")
+    graph_builder.set_entry_point("preprocess")
+    graph_builder.add_edge("preprocess", "ocr_extraction")
+    graph_builder.add_edge("ocr_extraction", "indexing")
+    # graph_builder.add_edge("indexing", "field_extraction")
     
-    return g.compile()
+    graph = graph_builder.compile()
+    return graph
 
 
 ingest_workflow_graph = build_graph()
