@@ -1,7 +1,7 @@
 from typing import Any, Dict, List, Optional, Tuple
 from pprint import pprint
 
-from models.state import ContractState
+from models.ingest_state import IngestState
 from services.llm import LLMService
 from services.vector_store import HybridVectorStore
 from config.settings import TOP_K
@@ -232,7 +232,7 @@ def _extract_field_from_chunks(field: str,
 
 
 
-def field_extraction_node(state: ContractState) -> ContractState:
+def field_extraction_node(state: IngestState) -> IngestState:
     from nodes.indexing import get_session_store 
     
     log = list(state.get("processing_log", []))

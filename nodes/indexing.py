@@ -2,7 +2,7 @@ import hashlib
 import re
 from pathlib import Path
 
-from models.state import ContractState
+from models.ingest_state import IngestState
 from services.vector_store import HybridVectorStore
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -58,7 +58,7 @@ def find_page_numbers_for_chunk(chunk: str, raw_text_by_page: Dict[int, str]) ->
     return primary_page, page_numbers
 
 
-def indexing_node(state: ContractState) -> ContractState:
+def indexing_node(state: IngestState) -> IngestState:
     log = list(state.get("processing_log", []))
     
     print("Indexing node invoked. Current state:", state)
