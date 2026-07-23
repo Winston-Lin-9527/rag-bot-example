@@ -4,7 +4,7 @@ from typing import Dict, Tuple
 from utils.hashes import compute_file_sha256
 from paddleocr import PaddleOCR
 
-from models.state import ContractState
+from models.ingest_state import IngestState
 from services.llm import LLMService
 from utils.file_utils import extract_native_pdf_text
 from utils import progress
@@ -123,7 +123,7 @@ def _report(page_num: int, total: int, status: str) -> None:
     progress.post(msg)
 
 
-def ocr_extraction_node(state: ContractState) -> dict:
+def ocr_extraction_node(state: IngestState) -> dict:
     log = list(state.get("processing_log", []))
 
     # XML / pre-filled text: skip OCR

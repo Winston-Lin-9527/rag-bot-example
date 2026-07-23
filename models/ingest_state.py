@@ -1,7 +1,7 @@
 from typing import Any, Dict, TypedDict, List
 
 
-class ContractState(TypedDict, total=False):
+class IngestState(TypedDict, total=False):
     """
     Represents the state of a contract, in processing order
     """

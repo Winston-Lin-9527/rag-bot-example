@@ -8,7 +8,7 @@ import imagehash
 import numpy as np
 from PIL import Image
 
-from models.state import ContractState
+from models.ingest_state import IngestState
 from utils.file_utils import pdf_to_images, make_temp_dir
 
 
@@ -96,7 +96,7 @@ def _xml_to_text(xml_path: str) -> str:
 
 # ── Node ─────────────────────────────────────────────────────────────────────
 
-def preprocess_node(state: ContractState) -> ContractState:
+def preprocess_node(state: IngestState) -> IngestState:
     log = list(state.get("processing_log", []))
     file_type = state["file_type"]
 
