@@ -1,0 +1,7 @@
+{
+  // The Python project now lives in backend/, with its virtualenv at backend/.venv.
+  "python.defaultInterpreterPath": "${workspaceFolder}/backend/.venv/bin/python",
+  // Resolve first-party absolute imports (e.g. `from config.settings import ...`)
+  // which are rooted at backend/, not the repo root.
+  "python.analysis.extraPaths": ["${workspaceFolder}/backend"]
+}

@@ -4,6 +4,7 @@ from typing import Dict, Tuple
 from utils.hashes import compute_file_sha256
 from paddleocr import PaddleOCR
 
+from config.settings import BASE_DIR
 from models.ingest_state import IngestState
 from services.llm import LLMService
 from utils.file_utils import extract_native_pdf_text
@@ -12,7 +13,7 @@ from utils import progress
 # Lazy-initialised singleton so the model loads once per process
 _ocr_engine: PaddleOCR | None = None
 _OCR_CACHE_VERSION = "ocr-v1"
-_OCR_CACHE_DIR = Path("./ocr_cache")
+_OCR_CACHE_DIR = BASE_DIR / "ocr_cache"
 
 
 def _get_ocr() -> PaddleOCR:

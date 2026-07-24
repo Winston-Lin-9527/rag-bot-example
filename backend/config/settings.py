@@ -1,8 +1,13 @@
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# Anchor all data paths to the backend/ package root so they resolve the same
+# regardless of the current working directory the process is launched from.
+BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 def require_env(name: str) -> str:
@@ -25,8 +30,8 @@ TOP_K = 3
 RRF_K = 60 # reciprocal rank fusion parameter
 
 DPI = 300
-TEMP_DIR = "./tmp/"
+TEMP_DIR = str(BASE_DIR / "tmp") + os.sep
 
 # CHROMA DB configs
-CHROMA_DB_DIR = "./chroma_db"
+CHROMA_DB_DIR = str(BASE_DIR / "chroma_db")
 CHROMA_COLLECTION_PREFIX = "contract_"

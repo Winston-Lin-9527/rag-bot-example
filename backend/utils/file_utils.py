@@ -48,6 +48,7 @@ def extract_native_pdf_text(pdf_path: str) -> Dict[int, str]:
 
 
 def make_temp_dir() -> str:
+    os.makedirs(TEMP_DIR, exist_ok=True)
     return tempfile.mkdtemp(dir=str(TEMP_DIR))
 
 
