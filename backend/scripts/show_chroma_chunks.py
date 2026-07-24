@@ -77,7 +77,6 @@ def main() -> None:
     )
     parser.add_argument(
         "--collection",
-        default="contract_agreement",
         help="Name of the Chroma collection to read.",
     )
     parser.add_argument(
