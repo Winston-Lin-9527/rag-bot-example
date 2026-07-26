@@ -26,7 +26,7 @@ EMBEDDING_API_KEY = require_env("EMBEDDING_API_KEY")
 EMBEDDING_DIMENSION = 384
 CHUNK_SIZE = 600
 CHUNK_SIZE_OVERLAP = 100
-TOP_K = 3
+TOP_K = 6
 RRF_K = 60 # reciprocal rank fusion parameter
 
 DPI = 300

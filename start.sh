@@ -2,13 +2,17 @@
 #
 # Bootstrap and run the contract-reviewer backend.
 #
-# Ensures dependencies are installed (uv sync) and forwards any arguments
-# to the CLI. Examples:
+# Ensures dependencies are installed (uv sync), starts the FastAPI app by
+# default, and still forwards ingest/query commands to the CLI. Examples:
 #
+#   ./start.sh
+#   ./start.sh api --reload
 #   ./start.sh ingest path/to/contract.pdf
 #   ./start.sh query my_collection --top-k 5
 #
-# Run with no arguments to see the CLI help.
+# Optional API bind overrides:
+#
+#   HOST=0.0.0.0 PORT=8002 ./start.sh
 
 set -euo pipefail
 
@@ -32,9 +36,16 @@ unset VIRTUAL_ENV
 echo "==> Syncing dependencies (uv sync)"
 uv sync
 
-if [ "$#" -eq 0 ]; then
-  echo "==> No command given. Showing CLI help."
-  exec uv run python app.py --help
+if [ "$#" -eq 0 ] || [ "$1" = "api" ] || [ "$1" = "server" ]; then
+  if [ "$#" -gt 0 ]; then
+    shift
+  fi
+
+  HOST="${HOST:-127.0.0.1}"
+  PORT="${PORT:-8002}"
+
+  echo "==> Starting API: uvicorn api.app:app --host $HOST --port $PORT $*"
+  exec uv run uvicorn api.app:app --host "$HOST" --port "$PORT" "$@"
 fi
 
 echo "==> Running: python app.py $*"

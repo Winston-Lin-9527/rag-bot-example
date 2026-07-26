@@ -1,5 +1,5 @@
 [project]
-name = "contract-reviewer"
+name = "qa-agent"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
@@ -7,6 +7,7 @@ requires-python = ">=3.12"
 dependencies = [
     "chromadb>=1.5.9",
     "dotenv>=0.9.9",
+    "fastapi>=0.127.0",
     "faiss-cpu>=1.14.3",
     "imagehash>=4.3.2",
     "langchain>=1.3.13",
@@ -20,4 +21,5 @@ dependencies = [
     "pymupdf>=1.28.0",
     "rank-bm25>=0.2.2",
     "sentence-transformers>=5.6.0",
+    "uvicorn[standard]>=0.40.0",
 ]

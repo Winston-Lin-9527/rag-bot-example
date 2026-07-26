@@ -13,3 +13,6 @@ tmp/
 ocr_cache/
 chroma_db/
 chroma/
+
+node_modules/
+frontend/dist/

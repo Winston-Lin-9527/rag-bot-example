@@ -6,7 +6,10 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from langchain_core.messages import HumanMessage
+
 from services.llm import LLMService
+from services.rag import DirectRAGService
 
 
 EXIT_COMMANDS = {"/exit", "/quit", "exit", "quit"}
@@ -120,12 +123,8 @@ def run_ingest(args: argparse.Namespace) -> None:
 def run_query(args: argparse.Namespace) -> None:
     load_environment()
 
-    from langchain_core.messages import HumanMessage
-
     from graphs.chat_graph import chat_workflow_graph
     from models.chat_state import ChatState
-    from services.llm import LLMService
-    from services.rag import DirectRAGService
 
     llm_service = LLMService(model=args.model)
     if args.top_k is None:
