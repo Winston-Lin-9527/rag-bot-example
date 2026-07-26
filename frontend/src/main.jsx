@@ -1,13 +1,63 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 
 function App() {
-  const [collectionName, setCollectionName] = useState("agreement");
+  const [collections, setCollections] = useState([]);
+  const [collectionName, setCollectionName] = useState("");
+  const [collectionsError, setCollectionsError] = useState("");
+  const [isLoadingCollections, setIsLoadingCollections] = useState(true);
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState([]);
   const [chunks, setChunks] = useState([]);
   const [isSending, setIsSending] = useState(false);
+
+  useEffect(() => {
+    let isCurrent = true;
+
+    async function loadCollections() {
+      try {
+        const response = await fetch("/api/collections");
+        const payload = await response.json();
+
+        if (!response.ok) {
+          throw new Error(payload.detail || "Could not load collections.");
+        }
+
+        const loadedCollections = payload.collections || [];
+        if (!isCurrent) {
+          return;
+        }
+
+        setCollections(loadedCollections);
+        setCollectionName((current) => {
+          if (current && loadedCollections.some((collection) => collection.name === current)) {
+            return current;
+          }
+          return loadedCollections[0]?.name || "";
+        });
+      } catch (error) {
+        if (isCurrent) {
+          setCollectionsError(error.message || "Could not load collections.");
+        }
+      } finally {
+        if (isCurrent) {
+          setIsLoadingCollections(false);
+        }
+      }
+    }
+
+    loadCollections();
+    return () => {
+      isCurrent = false;
+    };
+  }, []);
+
+  function handleCollectionChange(event) {
+    setCollectionName(event.target.value);
+    setMessages([]);
+    setChunks([]);
+  }
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -61,12 +111,22 @@ function App() {
           </div>
           <label className="collection-field">
             <span>Collection</span>
-            <input
+            <select
               value={collectionName}
-              onChange={(event) => setCollectionName(event.target.value)}
-              autoComplete="off"
-              placeholder="agreement"
-            />
+              onChange={handleCollectionChange}
+              disabled={isLoadingCollections || collections.length === 0}
+            >
+              {isLoadingCollections ? <option value="">Loading collections...</option> : null}
+              {!isLoadingCollections && collections.length === 0 ? (
+                <option value="">No indexed collections</option>
+              ) : null}
+              {collections.map((collection) => (
+                <option key={collection.raw_name} value={collection.name}>
+                  {collection.name}
+                </option>
+              ))}
+            </select>
+            {collectionsError ? <small>{collectionsError}</small> : null}
           </label>
         </header>
 

@@ -89,7 +89,7 @@ h1 {
   font-weight: 700;
 }
 
-.collection-field input,
+.collection-field select,
 .composer textarea {
   width: 100%;
   border: 1px solid var(--line);
@@ -99,9 +99,15 @@ h1 {
   outline: none;
 }
 
-.collection-field input {
+.collection-field select {
   height: 42px;
   padding: 0 12px;
+}
+
+.collection-field small {
+  color: #8b1e18;
+  font-size: 0.74rem;
+  font-weight: 600;
 }
 
 .messages {

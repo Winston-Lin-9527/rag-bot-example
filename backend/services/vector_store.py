@@ -1,10 +1,11 @@
 from typing import Any, Dict, List
 
-from config.settings import CHROMA_COLLECTION_PREFIX, CHROMA_DB_DIR, RRF_K, TOP_K
+from config.settings import CHROMA_COLLECTION_PREFIX, RRF_K, TOP_K
+from services.chroma import get_chroma_client
 from services.embeddings import EmbeddingService
 
 from rank_bm25 import BM25Okapi
-from chromadb import GetResult, PersistentClient, Documents, EmbeddingFunction, Embeddings
+from chromadb import GetResult, Documents, EmbeddingFunction, Embeddings
 
 # a thin adapter that translates our generic embedding capability into the shape one specific consumer (Chroma) expects.
 class _ChromaEmbeddingAdapter(EmbeddingFunction):
@@ -23,7 +24,7 @@ class HybridVectorStore:
         self.chunks: List[str] = []
         self.metadata: List[Dict[str, Any]] = []
         self._bm25: BM25Okapi | None = None
-        self._chroma_client = PersistentClient(path=CHROMA_DB_DIR)
+        self._chroma_client = get_chroma_client()
         self._chroma_collection = self._chroma_client.get_or_create_collection(
             name=f"{CHROMA_COLLECTION_PREFIX}{collection_name}",
             embedding_function=_ChromaEmbeddingAdapter(self._embedding_service), # so that when we upsert, the collection will automatically call this adapter to get embeddings for the chunks
