@@ -5,6 +5,11 @@ from typing import Any
 import chromadb
 
 
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+DEFAULT_DB_PATH = BACKEND_DIR / "chroma_db"
+COLLECTION_PREFIX = "contract_"
+
+
 def _sort_key(item: tuple[str, str | None, dict[str, Any] | None]) -> tuple[int, str]:
     chunk_id, _document, metadata = item
     if metadata and metadata.get("chunk_index") is not None:
@@ -15,13 +20,54 @@ def _sort_key(item: tuple[str, str | None, dict[str, Any] | None]) -> tuple[int,
     return 0, chunk_id
 
 
+def _collection_name(collection: object) -> str:
+    if isinstance(collection, str):
+        return collection
+    name = getattr(collection, "name", None)
+    if isinstance(name, str):
+        return name
+    return str(collection)
+
+
+def _resolve_collection_name(
+    client: chromadb.PersistentClient,
+    requested_name: str | None,
+) -> str:
+    names = sorted(_collection_name(collection) for collection in client.list_collections())
+    contract_names = [name for name in names if name.startswith(COLLECTION_PREFIX)]
+
+    if requested_name:
+        candidates = [requested_name]
+        if not requested_name.startswith(COLLECTION_PREFIX):
+            candidates.append(f"{COLLECTION_PREFIX}{requested_name}")
+        for candidate in candidates:
+            if candidate in names:
+                return candidate
+        raise SystemExit(
+            f"Collection {requested_name!r} was not found. Available collections: "
+            f"{', '.join(names) if names else '(none)'}"
+        )
+
+    if len(contract_names) == 1:
+        return contract_names[0]
+
+    if contract_names:
+        available = ", ".join(
+            name.removeprefix(COLLECTION_PREFIX) for name in contract_names
+        )
+        raise SystemExit(f"Pass --collection. Available contract collections: {available}")
+
+    raise SystemExit("No contract collections found.")
+
+
 def show_chunks(
     db_path: str,
-    collection_name: str,
+    collection_name: str | None,
     limit: int | None,
     show_metadata: bool,
 ) -> None:
     client = chromadb.PersistentClient(path=db_path)
+    collection_name = _resolve_collection_name(client, collection_name)
 
     try:
         collection = client.get_collection(name=collection_name)
@@ -66,13 +112,32 @@ def show_chunks(
         print()
 
 
+def delete_collection(db_path: str, collection_name: str | None, yes: bool) -> None:
+    if not collection_name:
+        raise SystemExit("Pass --collection to delete a collection.")
+    if not yes:
+        raise SystemExit("Pass --yes to confirm collection deletion.")
+
+    client = chromadb.PersistentClient(path=db_path)
+    resolved_name = _resolve_collection_name(client, collection_name)
+    client.delete_collection(name=resolved_name)
+    print(f"Deleted collection: {resolved_name}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Print chunks stored in a Chroma persistent collection."
+        description="Inspect or delete Chroma persistent collections."
+    )
+    parser.add_argument(
+        "command",
+        nargs="?",
+        choices=("show", "delete"),
+        default="show",
+        help="Command to run. Defaults to show.",
     )
     parser.add_argument(
         "--db-path",
-        default="./chroma_db",
+        default=str(DEFAULT_DB_PATH),
         help="Path to the Chroma persistent database directory.",
     )
     parser.add_argument(
@@ -90,9 +155,17 @@ def main() -> None:
         action="store_true",
         help="Print full metadata for each chunk.",
     )
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="Confirm destructive commands such as delete.",
+    )
 
     args = parser.parse_args()
-    show_chunks(args.db_path, args.collection, args.limit, args.show_metadata)
+    if args.command == "delete":
+        delete_collection(args.db_path, args.collection, args.yes)
+    else:
+        show_chunks(args.db_path, args.collection, args.limit, args.show_metadata)
 
 
 if __name__ == "__main__":
