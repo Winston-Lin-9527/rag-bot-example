@@ -18,7 +18,7 @@ class IngestState(TypedDict, total=False):
     
     # Indexing
     collection_name: str  # in: target collection; defaults to DEFAULT_COLLECTION_NAME
-    document_id: str      # in: identity within the collection, for filtered search
+    document_id: str      # in/out: identity within the collection, generated if absent
     source_name: str      # in: display name for citations; defaults to the filename
     chunks: List[str]
     chunk_metadata: List[Dict[str, Any]]  # metadata for each chunk

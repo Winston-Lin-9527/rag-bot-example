@@ -58,6 +58,18 @@ class HybridVectorStore:
         )
         return bool(hit["ids"])
 
+    def document_id_for_hash(self, document_hash: str) -> str | None:
+        """Return the stored document id for this exact indexed version, if any."""
+        hit = self._chroma_collection.get(
+            where={"document_hash": document_hash}, limit=1, include=["metadatas"]
+        )
+        metadatas = hit.get("metadatas") or []
+        if not metadatas:
+            return None
+
+        document_id = str((metadatas[0] or {}).get("document_id") or "")
+        return document_id or None
+
     def add_document(
         self,
         chunks: List[str],

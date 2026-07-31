@@ -1,6 +1,7 @@
 import hashlib
 import re
 from pathlib import Path
+from uuid import uuid4
 
 from models.ingest_state import IngestState
 from services.vector_store import HybridVectorStore
@@ -105,14 +106,19 @@ def indexing_node(state: IngestState) -> IngestState:
     # getting a collection of its own.
     collection_name = state.get("collection_name") or DEFAULT_COLLECTION_NAME
     document_hash = _document_hash(text)
-    # Falls back to the hash, not the filename: two different contracts both
-    # called "contract.pdf" must not end up as the same document, or filtering
-    # would conflate them and remove_document() would delete both.
-    document_id = state.get("document_id") or document_hash
 
     # create the session store and add the chunks with metadata
     global _session_store
     _session_store = HybridVectorStore(collection_name=collection_name)
+
+    # Generate an app-level document identity when the caller did not provide
+    # one. If this exact version is already indexed, reuse its stored id so the
+    # reported id still points at real chunks.
+    document_id = (
+        state.get("document_id")
+        or _session_store.document_id_for_hash(document_hash)
+        or str(uuid4())
+    )
     was_indexed = _session_store.add_document(chunks, chunk_metadata, document_hash, document_id)
 
     log.append("Indexing completed" if was_indexed else "Indexing skipped – document already indexed")
@@ -120,6 +126,7 @@ def indexing_node(state: IngestState) -> IngestState:
             "chunks": chunks,
             "chunk_metadata": chunk_metadata,
             "index_ready": True,
+            "document_id": document_id,
             "document_hash": document_hash,
             "current_step": "completed",
             "processing_log": log
