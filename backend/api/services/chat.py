@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from pathlib import Path
 
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 
@@ -51,6 +50,7 @@ def answer_chat(request: ChatRequest) -> ChatResponse:
     for index, item in enumerate(result.get("retrieved_evidence") or [], start=1):
         metadata = item.get("metadata") or {}
         source_path = item.get("source_path") or str(metadata.get("source_path") or "")
+        source_name = str(metadata["source_name"])
         referenced_chunks.append(ReferencedChunk(
             index=index,
             chunk=item["chunk"],
@@ -59,7 +59,7 @@ def answer_chat(request: ChatRequest) -> ChatResponse:
             chunk_index=metadata.get("chunk_index"),
             page_numbers=item["page_numbers"],
             source_path=source_path,
-            source_name=Path(source_path).name if source_path else "unknown",
+            source_name=source_name,
             rrf_score=item["rrf_score"],
             bm25_rank=item.get("bm25_rank"),
             dense_rank=item.get("dense_rank"),
