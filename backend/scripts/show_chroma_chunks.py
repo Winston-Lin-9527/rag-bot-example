@@ -6,7 +6,7 @@ import chromadb
 
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
-DEFAULT_DB_PATH = BACKEND_DIR / "chroma_db"
+DEFAULT_DB_PATH = BACKEND_DIR / "data" / "chroma_db"
 COLLECTION_PREFIX = "contract_"
 
 

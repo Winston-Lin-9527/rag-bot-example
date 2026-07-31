@@ -29,11 +29,15 @@ CHUNK_SIZE_OVERLAP = 100
 TOP_K = 6
 RRF_K = 60 # reciprocal rank fusion parameter
 
+# Runtime data directories. Keep generated state under one ignored tree so the
+# repo root does not collect sibling cache/database folders.
+DATA_DIR = str(BASE_DIR / "data")
 DPI = 300
-TEMP_DIR = str(BASE_DIR / "tmp") + os.sep
+TEMP_DIR = str(Path(DATA_DIR) / "tmp") + os.sep
+OCR_CACHE_DIR = str(Path(DATA_DIR) / "ocr_cache")
 
 # CHROMA DB configs
-CHROMA_DB_DIR = str(BASE_DIR / "chroma_db")
+CHROMA_DB_DIR = str(Path(DATA_DIR) / "chroma_db")
 CHROMA_COLLECTION_PREFIX = "contract_"
 # A collection holds many documents, separated by document_id metadata rather
 # than by living in collections of their own. Ingests that don't name a target
@@ -42,7 +46,6 @@ DEFAULT_COLLECTION_NAME = "library"
 
 # Uploaded document storage. Blobs are content-addressed under DATA_DIR/blobs;
 # all metadata (documents, indexings, jobs, runs) lives in DATA_DIR/app.db.
-DATA_DIR = str(BASE_DIR / "data")
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 ALLOWED_UPLOAD_SUFFIXES = {
     ".pdf",
