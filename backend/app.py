@@ -8,6 +8,7 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage
 
+from config.settings import DEFAULT_COLLECTION_NAME
 from services.llm import LLMService
 from services.rag import DirectRAGService
 
@@ -80,11 +81,23 @@ def build_parser() -> argparse.ArgumentParser:
     ingest_parser.add_argument("file_path", help="Path to a PDF, XML, or image contract file.")
     ingest_parser.add_argument("--file-type", choices=("pdf", "xml", "image"), help="Override file type inference.")
     ingest_parser.add_argument("--model", help="Override the configured OpenAI model for field extraction.")
+    ingest_parser.add_argument(
+        "--collection-name", default=None,
+        help=f"Collection to add this document to (default: {DEFAULT_COLLECTION_NAME}). "
+             "Collections hold many documents; they are not per-file.",
+    )
 
     query_parser = subparsers.add_parser("query", help="Chat with an indexed contract collection.")
-    query_parser.add_argument("collection_name", help="Unprefixed Chroma collection name, usually the indexed file stem.")
+    query_parser.add_argument(
+        "collection_name", nargs="?", default=DEFAULT_COLLECTION_NAME,
+        help=f"Unprefixed Chroma collection name (default: {DEFAULT_COLLECTION_NAME}).",
+    )
     query_parser.add_argument("--model", help="Override the configured OpenAI model.")
     query_parser.add_argument("--top-k", type=int, default=None, help="Number of chunks to retrieve per turn.")
+    query_parser.add_argument(
+        "--document-ids", nargs="*", default=None,
+        help="Restrict retrieval to these document ids. Omit to search the whole collection.",
+    )
 
     return parser
 
@@ -103,6 +116,7 @@ def run_ingest(args: argparse.Namespace) -> None:
     initial_state: IngestState = {
         "file_path": args.file_path,
         "file_type": file_type,
+        "collection_name": args.collection_name or DEFAULT_COLLECTION_NAME,
         "current_step": "preprocess",
         "processing_log": [],
     }
@@ -117,7 +131,10 @@ def run_ingest(args: argparse.Namespace) -> None:
         print(log_entry)
 
     if final_state.get("index_ready"):
-        print(f"Indexed collection: {Path(args.file_path).stem}")
+        collection_name = final_state.get("collection_name") or DEFAULT_COLLECTION_NAME
+        document_id = final_state.get("document_id") or final_state.get("document_hash", "")
+        print(f"Indexed into collection: {collection_name}")
+        print(f"  document_id: {document_id}   (query --document-ids {document_id})")
 
 
 def run_query(args: argparse.Namespace) -> None:
@@ -135,6 +152,7 @@ def run_query(args: argparse.Namespace) -> None:
     graph_config = {"configurable": {"rag_service": rag_service}}
     state: ChatState = {
         "collection_name": args.collection_name,
+        "document_ids": list(args.document_ids or []),
         "messages": [],
     }
 

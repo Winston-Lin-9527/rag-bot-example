@@ -8,7 +8,7 @@ from services.vector_store import HybridVectorStore
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from typing import Dict, Tuple, List
 
-from config.settings import CHUNK_SIZE, CHUNK_SIZE_OVERLAP
+from config.settings import CHUNK_SIZE, CHUNK_SIZE_OVERLAP, DEFAULT_COLLECTION_NAME
 
 # persistent DB store
 # needs to be used by query node later, not ideal TODO
@@ -71,6 +71,9 @@ def indexing_node(state: IngestState) -> IngestState:
     text = state["full_text"]
     raw_text_by_page = state.get("raw_text_by_page", {})
     source_path = state.get("file_path", "")
+    # Carried on every chunk so citations can name their document without a
+    # lookup — source_path becomes an opaque blob path once uploads land.
+    source_name = state.get("source_name") or Path(source_path).name
     
     # prep the chunks
     splitter = RecursiveCharacterTextSplitter(
@@ -92,20 +95,32 @@ def indexing_node(state: IngestState) -> IngestState:
             "page_number": page_number,
             "page_numbers": ",".join(str(p) for p in page_numbers),
             "source_path": source_path,
+            "source_name": source_name,
             "page_text": raw_text_by_page.get(page_number, "") # very inefficient, TODO
         }
         chunk_metadata.append(metadata)
 
+    # Documents share a collection and are told apart by document_id metadata,
+    # so an ingest that names no target lands in the shared default rather than
+    # getting a collection of its own.
+    collection_name = state.get("collection_name") or DEFAULT_COLLECTION_NAME
+    document_hash = _document_hash(text)
+    # Falls back to the hash, not the filename: two different contracts both
+    # called "contract.pdf" must not end up as the same document, or filtering
+    # would conflate them and remove_document() would delete both.
+    document_id = state.get("document_id") or document_hash
+
     # create the session store and add the chunks with metadata
     global _session_store
-    _session_store = HybridVectorStore(collection_name=Path(source_path).stem)
-    was_indexed = _session_store.add_document(chunks, chunk_metadata, _document_hash(text))
-    
+    _session_store = HybridVectorStore(collection_name=collection_name)
+    was_indexed = _session_store.add_document(chunks, chunk_metadata, document_hash, document_id)
+
     log.append("Indexing completed" if was_indexed else "Indexing skipped – document already indexed")
     return {**state,
             "chunks": chunks,
             "chunk_metadata": chunk_metadata,
             "index_ready": True,
+            "document_hash": document_hash,
             "current_step": "completed",
             "processing_log": log
     }

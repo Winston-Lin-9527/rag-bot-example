@@ -35,3 +35,25 @@ TEMP_DIR = str(BASE_DIR / "tmp") + os.sep
 # CHROMA DB configs
 CHROMA_DB_DIR = str(BASE_DIR / "chroma_db")
 CHROMA_COLLECTION_PREFIX = "contract_"
+# A collection holds many documents, separated by document_id metadata rather
+# than by living in collections of their own. Ingests that don't name a target
+# land here, so everything is searchable together by default.
+DEFAULT_COLLECTION_NAME = "library"
+
+# Uploaded document storage. Blobs are content-addressed under DATA_DIR/blobs;
+# all metadata (documents, indexings, jobs, runs) lives in DATA_DIR/app.db.
+DATA_DIR = str(BASE_DIR / "data")
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+ALLOWED_UPLOAD_SUFFIXES = {
+    ".pdf",
+    ".xml",
+    ".bmp",
+    ".jpeg",
+    ".jpg",
+    ".png",
+    ".tif",
+    ".tiff",
+    ".webp",
+}
+# Finished ingest jobs stay queryable for this long before being evicted.
+JOB_RETENTION_SECONDS = 3600

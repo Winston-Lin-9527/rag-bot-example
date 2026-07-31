@@ -13,6 +13,7 @@ def rag_answer_node(state: ChatState, config: RunnableConfig) -> ChatState:
         collection_name=state["collection_name"],
         question=state.get("question", ""),
         messages=state.get("messages", []),
+        document_ids=state.get("document_ids"),
     )
 
     if not result["context"]:

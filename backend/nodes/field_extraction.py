@@ -74,22 +74,26 @@ def _retrieve_top_chunks_for_field(field: str, store: HybridVectorStore) -> List
     for query in FIELD_QUERIES.get(field, []):
         top_k_matches = store.search(query, k_per_query)
         for match in top_k_matches:
-            chunk_id = match['chunk'][:40] # use first 40 chars of chunk as id, to avoid duplicates
+            # The store's own chunk id. Deduplicating on the first 40 characters
+            # used to be fine when a collection held one document; across several
+            # contracts the shared boilerplate preamble makes distinct chunks
+            # look identical and silently drops them.
+            chunk_id = match["chunk_id"]
             if chunk_id not in seen:
                 seen.add(chunk_id)
                 answers.append(match)
-    
+
     answers.sort(key=lambda x: x.get("rrf_score", 0), reverse=True)
-    
+
     # now the special case, page0 anchor fields, manually give another pass to search for them on page 0, to improve recall for these fields
     if field in PAGE_0_ANCHOR_FIELDS:
         page0_matches = store.search(f"{field} page 0", TOP_K)
         for match in page0_matches:
-            chunk_id = match['chunk'][:40] # use first 40 chars of chunk as id, to avoid duplicates
+            chunk_id = match["chunk_id"]
             if chunk_id not in seen:
                 seen.add(chunk_id)
                 answers.append(match)
-    
+
     return answers[:k_cap]
 
 
@@ -98,31 +102,34 @@ def _build_parent_context(chunks: List[Dict]) -> Tuple[str, List[int]]:
 
     Only pages whose best chunk score is >= 50% of the top score are included.
     Returns the context string and the sorted list of unique page numbers (1-indexed).
+
+    Pages are keyed by (document_id, page_number), not page_number alone: a
+    collection holds several contracts and every one of them has a page 5.
     """
-    page_best_score: Dict[int, float] = {}
-    page_texts: Dict[int, str] = {}
+    page_best_score: Dict[Tuple[str, int], float] = {}
+    page_texts: Dict[Tuple[str, int], str] = {}
 
     for r in chunks:
-        pg = _metadata_page_number(r["metadata"])
+        key = (str(r["metadata"].get("document_id", "")), _metadata_page_number(r["metadata"]))
         score = r.get("rrf_score", 0.0)
-        if score > page_best_score.get(pg, -1.0):
-            page_best_score[pg] = score
-        if pg not in page_texts:
-            page_texts[pg] = r["metadata"].get("page_text") or r["chunk"]
+        if score > page_best_score.get(key, -1.0):
+            page_best_score[key] = score
+        if key not in page_texts:
+            page_texts[key] = r["metadata"].get("page_text") or r["chunk"]
 
     if page_best_score:
         top_score = max(page_best_score.values())
         threshold = top_score * 0.5
-        relevant_pages = {pg for pg, sc in page_best_score.items() if sc >= threshold}
+        relevant_pages = {key for key, sc in page_best_score.items() if sc >= threshold}
     else:
         relevant_pages = set(page_texts)
 
-    filtered = {pg: page_texts[pg] for pg in relevant_pages}
+    filtered = {key: page_texts[key] for key in relevant_pages}
     context = "\n\n".join(
         f"[Full page {pg + 1}]\n{text}"
-        for pg, text in sorted(filtered.items())
+        for (_, pg), text in sorted(filtered.items(), key=lambda kv: (kv[0][1], kv[0][0]))
     )
-    page_numbers = sorted(pg + 1 for pg in filtered)
+    page_numbers = sorted({pg + 1 for _, pg in filtered})
     return context, page_numbers
 
 

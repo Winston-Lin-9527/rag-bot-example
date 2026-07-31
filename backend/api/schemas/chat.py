@@ -16,11 +16,16 @@ class ChatRequest(BaseModel):
     messages: list[ChatTurn] = Field(default_factory=list)
     model: str | None = None
     top_k: int | None = Field(default=None, ge=1)
+    # Restrict retrieval to these documents. Omitted or empty searches the whole
+    # collection, which keeps existing clients working unchanged.
+    document_ids: list[str] | None = None
 
 
 class ReferencedChunk(BaseModel):
     index: int
     chunk: str
+    chunk_id: str | None = None
+    document_id: str | None = None
     chunk_index: Any = None
     page_numbers: list[int]
     source_path: str

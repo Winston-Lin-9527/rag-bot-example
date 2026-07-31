@@ -1,11 +1,22 @@
-from typing import Any, Dict, List
+"""Hybrid dense + BM25 retrieval over a Chroma collection.
+
+A collection holds many documents. `document_id` metadata selects among them at
+query time, so "search this contract" and "search this whole matter" are the same
+code path with a different filter.
+
+The store keeps no chunk state. Dense search is answered by Chroma directly, and
+the BM25 corpus is fetched per query under the *same* filter as the dense side —
+see `search()` for why both of those matter.
+"""
+
+from typing import Any, Dict, List, Sequence
 
 from config.settings import CHROMA_COLLECTION_PREFIX, RRF_K, TOP_K
 from services.chroma import get_chroma_client
 from services.embeddings import EmbeddingService
 
 from rank_bm25 import BM25Okapi
-from chromadb import GetResult, Documents, EmbeddingFunction, Embeddings
+from chromadb import Documents, EmbeddingFunction, Embeddings
 
 # a thin adapter that translates our generic embedding capability into the shape one specific consumer (Chroma) expects.
 class _ChromaEmbeddingAdapter(EmbeddingFunction):
@@ -17,188 +28,213 @@ class _ChromaEmbeddingAdapter(EmbeddingFunction):
         return self.embedding_service.encode(list(input)).tolist()
 
 
-class HybridVectorStore: 
+def _chroma_filter_primitive(document_ids: Sequence[str] | None) -> Dict[str, Any] | None:
+    """Chroma `where` selecting a subset of documents, or None for the whole collection."""
+    if not document_ids:
+        return None
+    return {"document_id": {"$in": list(document_ids)}}
+
+
+class HybridVectorStore:
     def __init__(self, collection_name: str):
         self._embedding_service = EmbeddingService.get_instance()
-        # self._index = faiss.IndexFlatIP(self._embedding_service.embedding_dimension)
-        self.chunks: List[str] = []
-        self.metadata: List[Dict[str, Any]] = []
-        self._bm25: BM25Okapi | None = None
         self._chroma_client = get_chroma_client()
         self._chroma_collection = self._chroma_client.get_or_create_collection(
             name=f"{CHROMA_COLLECTION_PREFIX}{collection_name}",
             embedding_function=_ChromaEmbeddingAdapter(self._embedding_service), # so that when we upsert, the collection will automatically call this adapter to get embeddings for the chunks
             metadata={"hnsw:space": "cosine"}
         )
-        self._load_from_chroma()
-        
-    
-    # needed because we're using BM25, Chroma dense search alone doesn't need it 
-    def _load_from_chroma(self):
-        result: GetResult = self._chroma_collection.get(include=["documents", "metadatas"])
-        docs = result.get("documents", [])
-        metas = result.get("metadatas", [])
-        
-        # the db is empty, so we don't have anything to load
-        if not docs:
-            self.chunks, self.metadata, self._bm25 = [], [], None
-            return
 
-        # BM25 indices, chunks, and metadata must be sorted by chunk_index to ensure that the BM25 indices align with the chunks and metadata
-        # so we sort by a stable key (chunk_index)
-        paired = sorted(zip(docs, metas),
-                        key=lambda dm: int(dm[1].get("chunk_index", 0)))
-        self.chunks = [d for d, _ in paired]
-        self.metadata = [m for _, m in paired]
-        self._rebuild_bm25()
-        
-        
-    def _rebuild_bm25(self):
-        if self.chunks:
-            tokenized_corpus = [chunk.lower().split() for chunk in self.chunks]
-            self._bm25 = BM25Okapi(tokenized_corpus)
-        else:
-            self._bm25 = None
-    
-    
-    def _existing_document_hashes(self) -> set[str]:
-        """Return a set of unique document hashes from the metadata."""
-        return {
-            str(meta.get("document_hash"))
-            for meta in self.metadata
-            if meta.get("document_hash")
-        }
-    
+    # ---------------------------------------------------------------- writing
+
+    def has_document(self, document_hash: str) -> bool:
+        """Is this exact version of a document already indexed here?
+
+        A `where` lookup rather than a scan of loaded metadata: the answer is one
+        row, so there is no reason to pull the collection into memory for it.
+        """
+        hit = self._chroma_collection.get(
+            where={"document_hash": document_hash}, limit=1, include=[]
+        )
+        return bool(hit["ids"])
+
     def add_document(
         self,
         chunks: List[str],
         metadata: List[Dict[str, Any]],
         document_hash: str,
+        document_id: str,
     ) -> bool:
-        """Index a document by splitting it into chunks, generating embeddings, and storing them in the vector store.
+        """Add one document to the collection, leaving every other document alone.
+
+        Returns False if this exact version is already present. Note this asks
+        whether the hash is *among* those indexed, not whether it is the only one
+        — the latter is what forced the old reset()-on-mismatch behaviour that
+        kept a collection single-document.
         """
-        existing_hashes = self._existing_document_hashes()
-        
-        # Same document version is already indexed, so avoid re-embedding and upserting.
-        if existing_hashes == {document_hash}:
-            return False # just skip
-        
-        # Any existing chunks with a different or missing hash belong to an older index version.
-        if self.chunks:
-            self.reset()
-        
-        self._index_document(chunks, metadata, document_hash)
-        
+        if self.has_document(document_hash):
+            return False  # already indexed at this version, nothing to re-embed
+
+        self._index_document(chunks, metadata, document_hash, document_id)
         return True
-    
-    
+
     def _index_document(
             self,
             chunks: List[str],
             metadata: List[Dict[str, Any]],
-            document_hash: str
-        ) -> None:   
+            document_hash: str,
+            document_id: str,
+        ) -> None:
         """internal method
         """
         if len(chunks) != len(metadata):
             raise ValueError("chunks and metadata must have the same length")
-        
+
         if not document_hash:
             raise ValueError("document_hash must be provided to ensure unique chunk IDs")
 
+        if not document_id:
+            raise ValueError("document_id must be provided so chunks can be filtered on")
+
+        # Already collection-unique, which is what makes it usable as the fusion
+        # key in search(). chunk_index is not: it restarts at 0 per document.
         ids = [f"{document_hash}:chunk_{i}" for i in range(len(chunks))]
-        
+
         # TODO: technically i don't need to call encode here? because the Chroma collection will call it again when we upsert? cuz i gave it embedding_function at chrome collection init
         embeddings = self._embedding_service.encode(chunks).tolist()
         metadatas = [
-            {**meta, "chunk_index": i, "document_hash": document_hash} for i, meta in enumerate(metadata)
+            {
+                **meta,
+                "chunk_index": i,  # ordinal within this document, for display only
+                "document_hash": document_hash,
+                "document_id": document_id,
+            }
+            for i, meta in enumerate(metadata)
         ]
-        
-        # self._index.add(embeddings)
+
         self._chroma_collection.upsert(
             ids=ids,
             documents=chunks,
             embeddings=embeddings,
             metadatas=metadatas
         )
-        
-        self.chunks = list(chunks)
-        self.metadata = metadatas
-        self._rebuild_bm25()
-    
-    
-    def search(self, query: str, top_k: int = TOP_K) -> List[Dict[str, Any]]:
-        """_summary_
 
-        Args:
-            query (str): _description_
-            top_k (int, optional): _description_. Defaults to TOP_K.
+    def remove_document(self, document_id: str) -> None:
+        """Drop one document's chunks, leaving the rest of the collection intact."""
+        self._chroma_collection.delete(where={"document_id": document_id})
 
-        Returns:
-            List[Dict[str, Any]]: _description_, the list of matches
+    def list_documents(self) -> List[Dict[str, Any]]:
+        """Distinct documents in this collection, for pickers and filter UIs.
+
+        Chroma has no DISTINCT, so this folds every chunk's metadata — and
+        `include=["metadatas"]` drags along the page_text copy on each one. Fine
+        at current scale, but this is a derived view: once documents have their
+        own table, read them from there and treat this as a reconcile tool.
         """
-        
-        if not self.chunks:
-            return []
-        
-        # can't return more results than there are chunks
-        top_k = min(top_k, len(self.chunks))
-        
+        result = self._chroma_collection.get(include=["metadatas"])
+        documents: Dict[str, Dict[str, Any]] = {}
+
+        for meta in result["metadatas"]:
+            document_id = str(meta.get("document_id") or "")
+            if not document_id:
+                continue  # indexed before document_id existed
+            entry = documents.setdefault(document_id, {
+                "document_id": document_id,
+                "document_hash": str(meta.get("document_hash") or ""),
+                "source_name": str(meta.get("source_name") or ""),
+                "source_path": str(meta.get("source_path") or ""),
+                "chunk_count": 0,
+            })
+            entry["chunk_count"] += 1
+
+        return sorted(documents.values(), key=lambda d: (d["source_name"], d["document_id"]))
+
+    def reset(self) -> None:
+        """Clear the entire collection. No longer part of the add path."""
+        ids = self._chroma_collection.get(include=[])["ids"]
+        if ids:
+            self._chroma_collection.delete(ids=ids)
+
+    # --------------------------------------------------------------- querying
+
+    def search(
+        self,
+        query: str,
+        top_k: int = TOP_K,
+        document_ids: Sequence[str] | None = None,
+    ) -> List[Dict[str, Any]]:
+        """Hybrid search, optionally scoped to a subset of documents.
+
+        Both halves fuse on the Chroma chunk id, which is unique across the
+        collection. The previous version fused BM25's list position against the
+        dense side's chunk_index metadata; those two agree only while a
+        collection holds one document, and silently return the wrong chunk once
+        it holds two.
+        """
+        where = _chroma_filter_primitive(document_ids)
+
         # ------method 1: BM25 Sparse search------
-        bm25_results = self._bm25.get_scores(query.lower().split())
-        bm25_results = sorted(range(len(bm25_results)), key=lambda i: bm25_results[i], reverse=True)[:top_k]
-        bm25_ranks: Dict[int, int] = {int(idx): rank for rank, idx in enumerate(bm25_results)}
-        
-        # ------method 2: FAISS Dense search------
-        # query_embedding = self._embedding_service.encode_single(query).reshape(1, -1)
-        # D, I = self._index.search(query_embedding, top_k)
-        # faiss_ranks: Dict[int, int] = {
-        #     int(idx): rank
-        #     for rank, idx in enumerate(I[0])
-        #     if idx >= 0
-        # }
-        results = self._chroma_collection.query(
+        # BM25 scores against a corpus it holds in memory, so unlike the dense
+        # half it cannot be filtered by Chroma — fetch the candidate set and
+        # build the index over exactly that. Applying the same `where` is not
+        # only an optimisation: BM25 weights a term by how rare it is in the
+        # corpus, so scoring against unselected documents would let unrelated
+        # contracts shift this one's ranking.
+        # include=["documents"] deliberately omits metadata, which carries a copy
+        # of the whole page text on every chunk (see indexing.py).
+        corpus = self._chroma_collection.get(where=where, include=["documents"])
+        corpus_ids: List[str] = corpus["ids"]
+        corpus_docs: List[str] = corpus["documents"]
+
+        if not corpus_ids:
+            return []
+
+        # can't return more results than there are chunks
+        top_k = min(top_k, len(corpus_ids))
+
+        bm25 = BM25Okapi([doc.lower().split() for doc in corpus_docs])
+        scores = bm25.get_scores(query.lower().split())
+        best = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:top_k]
+        bm25_ranks: Dict[str, int] = {
+            corpus_ids[position]: rank for rank, position in enumerate(best)
+        }
+
+        # ------method 2: Chroma Dense search------
+        dense = self._chroma_collection.query(
             query_texts=[query],
             n_results=top_k,
-            include=["documents", "metadatas", "distances"] # the fields we are retriving from db
+            where=where,
+            include=["documents", "metadatas"] # the fields we are retriving from db
         )
-        docs = results.get("documents")[0]
-        metas = results.get("metadatas")[0]
-        distances = results.get("distances")[0]
-        # Chroma returns results already sorted by distance(best-first), so rank = enumeration index
-        dense_ranks: Dict[int, int] = {
-            int(meta.get("chunk_index", -1)): rank # chunk index was created at upsert time, refer to add_document()
-            for rank, (meta, _) in enumerate(zip(metas, distances)) # distance unused, but we could use it for scoring if we wanted to
-            if meta.get("chunk_index", -1) >= 0
-        }
-        
+        # Chroma returns results already sorted by distance (best-first), so rank = enumeration index
+        dense_ids: List[str] = dense["ids"][0]
+        dense_ranks: Dict[str, int] = {chunk_id: rank for rank, chunk_id in enumerate(dense_ids)}
+
         # ------RRF Fusion------
-        all_idx = set(bm25_ranks.keys()) | set(dense_ranks.keys()) # set of all unique indices from both methods
-        rrf: Dict[int, float] = {} # {index: score} where score is the RRF score
-        for idx in all_idx:
-            bm25_rank = bm25_ranks.get(idx, float('inf')) # if not found, assign a large rank
-            dense_rank = dense_ranks.get(idx, float('inf')) # if not found, assign a large rank
-            rrf_score = 1 / (RRF_K + bm25_rank + 1) + 1 / (RRF_K + dense_rank + 1) # RRF formula
-            rrf[idx] = rrf_score
-            
-        sorted_rrf = sorted(rrf.items(), key=lambda item: item[1], reverse=True)[:top_k] # sort by RRF score and take top_k
+        rrf: Dict[str, float] = {}
+        for chunk_id in set(bm25_ranks) | set(dense_ranks):
+            bm25_rank = bm25_ranks.get(chunk_id, float('inf')) # if not found, assign a large rank
+            dense_rank = dense_ranks.get(chunk_id, float('inf')) # if not found, assign a large rank
+            rrf[chunk_id] = 1 / (RRF_K + bm25_rank + 1) + 1 / (RRF_K + dense_rank + 1) # RRF formula
+
+        winners = sorted(rrf.items(), key=lambda item: item[1], reverse=True)[:top_k]
+
+        texts = dict(zip(corpus_ids, corpus_docs))
+        metadatas = dict(zip(dense_ids, dense["metadatas"][0]))
+        # Chunks BM25 found but dense missed carry no metadata yet — fetch just those.
+        missing = [chunk_id for chunk_id, _ in winners if chunk_id not in metadatas]
+        if missing:
+            fetched = self._chroma_collection.get(ids=missing, include=["metadatas"])
+            metadatas.update(zip(fetched["ids"], fetched["metadatas"]))
+
         return [
             {
-                "chunk": self.chunks[idx],
-                "metadata": self.metadata[idx],
-                "bm25_rank": bm25_ranks.get(idx, None),
-                "dense_rank": dense_ranks.get(idx, None),
+                "chunk_id": chunk_id,
+                "chunk": texts.get(chunk_id, ""),
+                "metadata": metadatas.get(chunk_id, {}),
+                "bm25_rank": bm25_ranks.get(chunk_id, None),
+                "dense_rank": dense_ranks.get(chunk_id, None),
                 "rrf_score": score
             }
-            for idx, score in sorted_rrf
+            for chunk_id, score in winners
         ]
-    
-    def reset(self):
-        # self._index.reset()
-        ids = self._chroma_collection.get()['ids']
-        if ids:
-            self._chroma_collection.delete(ids=ids) # delete all documents in the collection
-        
-        self.chunks.clear()
-        self.metadata.clear()
-        self._bm25 = None

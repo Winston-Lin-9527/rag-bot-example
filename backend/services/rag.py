@@ -31,6 +31,7 @@ class DirectRAGService:
         question: str,
         messages: Sequence[AnyMessage] | None = None,
         top_k: int | None = None,
+        document_ids: Sequence[str] | None = None,
     ) -> RAGAnswer:
         """
         Steps:
@@ -55,8 +56,10 @@ class DirectRAGService:
             raise ValueError("question must be provided")
 
         # Query an already-built Chroma collection. This path does not run OCR/indexing.
+        # document_ids narrows the search to specific documents in that collection;
+        # None searches all of them.
         store = HybridVectorStore(collection_name=collection_name)
-        matches = store.search(question, top_k or self.default_top_k)
+        matches = store.search(question, top_k or self.default_top_k, document_ids=document_ids)
 
         # Accumulate three outputs from the same retrieval results:
         # structured evidence for debugging/state, citations for UI, and context for the LLM.
@@ -64,7 +67,7 @@ class DirectRAGService:
         citations: list[Citation] = []
         context_blocks: list[str] = []
         seen_context_pages: set[tuple[str, tuple[int, ...]]] = set()
-        seen_citations: set[tuple[int, str, str]] = set()
+        seen_citations: set[tuple[str, int, str, str]] = set()
         remaining_chars = self.max_context_chars
 
         for match in matches:
@@ -97,6 +100,8 @@ class DirectRAGService:
             # convert raw match dicts into typed RetrievedEvidence
             item: RetrievedEvidence = {
                 "chunk": chunk,
+                "chunk_id": str(match.get("chunk_id") or ""),
+                "document_id": str(metadata.get("document_id") or ""),
                 "metadata": metadata,
                 "page_number": raw_page_number + 1,
                 "page_numbers": sorted(set(page_numbers)),
@@ -114,12 +119,15 @@ class DirectRAGService:
             evidence.append(item)
 
             # Citations use the exact retrieved chunk, not expanded page text.
+            # Keyed by document as well as page: every contract in the collection
+            # has a page 7, and two of them can quote the same boilerplate.
             excerpt = chunk[:497].rstrip() + "..." if len(chunk) > 500 else chunk
-            citation_key = (item["page_number"], source_path, excerpt)
+            citation_key = (item["document_id"], item["page_number"], source_path, excerpt)
             if citation_key not in seen_citations:
                 seen_citations.add(citation_key)
                 citations.append({
                     "page_number": item["page_number"],
+                    "document_id": item["document_id"],
                     "source_path": source_path,
                     "excerpt": excerpt,
                 })

@@ -1,6 +1,12 @@
-from api.schemas.collections import CollectionSummary, CollectionsResponse
+from api.schemas.collections import (
+    CollectionDocumentsResponse,
+    CollectionSummary,
+    CollectionsResponse,
+    DocumentSummary,
+)
 from config.settings import CHROMA_COLLECTION_PREFIX
 from services.chroma import get_chroma_client
+from services.vector_store import HybridVectorStore
 
 
 def collection_raw_name(collection: object) -> str:
@@ -25,3 +31,17 @@ def list_contract_collections() -> CollectionsResponse:
             collections.append(CollectionSummary(name=name, raw_name=raw_name))
 
     return CollectionsResponse(collections=collections)
+
+
+def list_collection_documents(collection_name: str) -> CollectionDocumentsResponse:
+    """The documents inside one collection.
+
+    A collection used to be a single contract, so the collection list doubled as
+    the document list. Now that documents share a collection and are separated by
+    metadata, picking one needs its own call.
+    """
+    store = HybridVectorStore(collection_name=collection_name)
+    return CollectionDocumentsResponse(
+        collection_name=collection_name,
+        documents=[DocumentSummary(**document) for document in store.list_documents()],
+    )

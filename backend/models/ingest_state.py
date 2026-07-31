@@ -17,9 +17,13 @@ class IngestState(TypedDict, total=False):
     full_text: str
     
     # Indexing
+    collection_name: str  # in: target collection; defaults to DEFAULT_COLLECTION_NAME
+    document_id: str      # in: identity within the collection, for filtered search
+    source_name: str      # in: display name for citations; defaults to the filename
     chunks: List[str]
     chunk_metadata: List[Dict[str, Any]]  # metadata for each chunk
     index_ready: bool
+    document_hash: str    # out: the hash the chunks were indexed under
     
     # extracted fields
     extracted_fields: Dict[str, str]
