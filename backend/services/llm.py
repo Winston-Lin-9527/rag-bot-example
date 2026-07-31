@@ -7,7 +7,7 @@ from typing import Optional, List, Tuple
 
 from openai import OpenAI, RateLimitError, APIConnectionError, APIStatusError
 
-from config.settings import OPENAI_API_BASE, OPENAI_API_KEY, OPENAI_MODEL
+from config.settings import OPENAI_API_BASE, OPENAI_API_KEY, OPENAI_MODEL, require_env
 
 _RETRYABLE = (RateLimitError, APIConnectionError)
 _MAX_RETRIES = 3
@@ -15,9 +15,12 @@ _RETRY_DELAY = 5  # seconds
 
 
 class LLMService:
-    def __init__(self, model: Optional[str] = OPENAI_MODEL, api_key: Optional[str] = None):
-        self.client = OpenAI(api_key=api_key or OPENAI_API_KEY, base_url=OPENAI_API_BASE or None)
-        self.model = model or OPENAI_MODEL
+    def __init__(self, model: Optional[str] = None, api_key: Optional[str] = None):
+        self.client = OpenAI(
+            api_key=api_key or OPENAI_API_KEY or require_env("EMBEDDING_API_KEY"),
+            base_url=OPENAI_API_BASE or require_env("EMBEDDING_API_ENDPOINT"),
+        )
+        self.model = model or OPENAI_MODEL or require_env("OPENAI_MODEL")
 
     def _build_messages(self, prompt: str, images: Optional[List[str]] = None) -> list:
         if images:

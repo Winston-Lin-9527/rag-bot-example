@@ -6,18 +6,19 @@ from config.settings import (
     EMBEDDING_API_ENDPOINT,
     EMBEDDING_API_KEY,
     EMBEDDING_DIMENSION,
+    require_env,
 )
 
 
 class EmbeddingService:
     _instance: "EmbeddingService | None" = None
     
-    def __init__(self, embedding_model: str = EMBEDDING_API_DEPLOYMENT):
+    def __init__(self, embedding_model: str | None = None):
         self.client = OpenAI(
-            base_url=EMBEDDING_API_ENDPOINT,
-            api_key=EMBEDDING_API_KEY,
+            base_url=EMBEDDING_API_ENDPOINT or require_env("EMBEDDING_API_ENDPOINT"),
+            api_key=EMBEDDING_API_KEY or require_env("EMBEDDING_API_KEY"),
         )
-        self.embedding_model = embedding_model
+        self.embedding_model = embedding_model or EMBEDDING_API_DEPLOYMENT
         self.embedding_dimension = EMBEDDING_DIMENSION
         
     @classmethod
