@@ -147,14 +147,12 @@ class HybridVectorStore:
         documents: Dict[str, Dict[str, Any]] = {}
 
         for meta in result["metadatas"]:
-            document_id = str(meta.get("document_id") or "")
-            if not document_id:
-                continue  # indexed before document_id existed
+            document_id = str(meta["document_id"])
             entry = documents.setdefault(document_id, {
                 "document_id": document_id,
-                "document_hash": str(meta.get("document_hash") or ""),
-                "source_name": str(meta.get("source_name") or ""),
-                "source_path": str(meta.get("source_path") or ""),
+                "document_hash": str(meta["document_hash"]),
+                "source_name": str(meta["source_name"]),
+                "source_path": str(meta["source_path"]),
                 "chunk_count": 0,
             })
             entry["chunk_count"] += 1

@@ -117,7 +117,7 @@ def indexing_node(state: IngestState) -> IngestState:
     document_id = (
         state.get("document_id")
         or _session_store.document_id_for_hash(document_hash)
-        or str(uuid4())
+        or uuid4().hex
     )
     was_indexed = _session_store.add_document(chunks, chunk_metadata, document_hash, document_id)
 
