@@ -1,5 +1,8 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { listCollections, sendChat } from "./api.js";
+import DocumentPicker from "./DocumentPicker.jsx";
+import UploadPanel from "./UploadPanel.jsx";
 import "./styles.css";
 
 function App() {
@@ -11,52 +14,63 @@ function App() {
   const [messages, setMessages] = useState([]);
   const [chunks, setChunks] = useState([]);
   const [isSending, setIsSending] = useState(false);
+  const [selectedDocumentIds, setSelectedDocumentIds] = useState([]);
+  const [documentsRefreshKey, setDocumentsRefreshKey] = useState(0);
 
-  useEffect(() => {
-    let isCurrent = true;
+  const loadCollections = useCallback(async (isCurrent = () => true) => {
+    setIsLoadingCollections(true);
+    try {
+      const payload = await listCollections();
+      const loadedCollections = payload.collections || [];
+      if (!isCurrent()) {
+        return;
+      }
 
-    async function loadCollections() {
-      try {
-        const response = await fetch("/api/collections");
-        const payload = await response.json();
-
-        if (!response.ok) {
-          throw new Error(payload.detail || "Could not load collections.");
+      setCollections(loadedCollections);
+      setCollectionName((current) => {
+        if (current && loadedCollections.some((collection) => collection.name === current)) {
+          return current;
         }
-
-        const loadedCollections = payload.collections || [];
-        if (!isCurrent) {
-          return;
-        }
-
-        setCollections(loadedCollections);
-        setCollectionName((current) => {
-          if (current && loadedCollections.some((collection) => collection.name === current)) {
-            return current;
-          }
-          return loadedCollections[0]?.name || "";
-        });
-      } catch (error) {
-        if (isCurrent) {
-          setCollectionsError(error.message || "Could not load collections.");
-        }
-      } finally {
-        if (isCurrent) {
-          setIsLoadingCollections(false);
-        }
+        return loadedCollections[0]?.name || "library";
+      });
+      setCollectionsError("");
+    } catch (error) {
+      if (isCurrent()) {
+        setCollectionsError(error.message || "Could not load collections.");
+      }
+    } finally {
+      if (isCurrent()) {
+        setIsLoadingCollections(false);
       }
     }
+  }, []);
 
-    loadCollections();
+  useEffect(() => {
+    let current = true;
+    loadCollections(() => current);
     return () => {
-      isCurrent = false;
+      current = false;
     };
+  }, [loadCollections]);
+
+  const handleDocumentsLoaded = useCallback((documents) => {
+    setSelectedDocumentIds((current) =>
+      current.filter((documentId) => documents.some((document) => document.document_id === documentId))
+    );
   }, []);
 
   function handleCollectionChange(event) {
     setCollectionName(event.target.value);
+    setSelectedDocumentIds([]);
     setMessages([]);
     setChunks([]);
+  }
+
+  function handleUploadComplete(payload) {
+    setCollectionName(payload.collection_name);
+    setSelectedDocumentIds([payload.document_id]);
+    setDocumentsRefreshKey((value) => value + 1);
+    loadCollections();
   }
 
   async function handleSubmit(event) {
@@ -74,20 +88,12 @@ function App() {
     setIsSending(true);
 
     try {
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          collection_name: trimmedCollection,
-          question: trimmedQuestion,
-          messages,
-        }),
+      const payload = await sendChat({
+        collection_name: trimmedCollection,
+        question: trimmedQuestion,
+        messages,
+        document_ids: selectedDocumentIds,
       });
-      const payload = await response.json();
-
-      if (!response.ok) {
-        throw new Error(payload.detail || "Chat request failed.");
-      }
 
       setMessages([...nextMessages, { role: "assistant", content: payload.answer }]);
       setChunks(payload.referenced_chunks || []);
@@ -103,6 +109,17 @@ function App() {
 
   return (
     <main className="shell">
+      <aside className="library-panel" aria-label="Library controls">
+        <UploadPanel collectionName={collectionName} onComplete={handleUploadComplete} />
+        <DocumentPicker
+          collectionName={collectionName}
+          refreshKey={documentsRefreshKey}
+          selectedDocumentIds={selectedDocumentIds}
+          onSelectionChange={setSelectedDocumentIds}
+          onDocumentsLoaded={handleDocumentsLoaded}
+        />
+      </aside>
+
       <section className="chat-panel" aria-label="Contract chat">
         <header className="topbar">
           <div>
@@ -118,7 +135,7 @@ function App() {
             >
               {isLoadingCollections ? <option value="">Loading collections...</option> : null}
               {!isLoadingCollections && collections.length === 0 ? (
-                <option value="">No indexed collections</option>
+                <option value="library">library</option>
               ) : null}
               {collections.map((collection) => (
                 <option key={collection.raw_name} value={collection.name}>

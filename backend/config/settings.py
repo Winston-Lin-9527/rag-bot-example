@@ -58,5 +58,3 @@ ALLOWED_UPLOAD_SUFFIXES = {
     ".tiff",
     ".webp",
 }
-# Finished ingest jobs stay queryable for this long before being evicted.
-JOB_RETENTION_SECONDS = 3600

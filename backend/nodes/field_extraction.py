@@ -4,7 +4,7 @@ from pprint import pprint
 from models.ingest_state import IngestState
 from nodes.indexing import get_session_store
 from services.llm import LLMService
-from services.vector_store import HybridVectorStore
+from services.vector_store import HybridVectorStoreService
 from config.settings import TOP_K
 
 from langchain_core.runnables import RunnableConfig
@@ -62,7 +62,7 @@ def _metadata_page_number(metadata: Dict[str, Any]) -> int:
     except (TypeError, ValueError):
         return 0
 
-def _retrieve_top_chunks_for_field(field: str, store: HybridVectorStore) -> List[Dict[str, Any]]:
+def _retrieve_top_chunks_for_field(field: str, store: HybridVectorStoreService) -> List[Dict[str, Any]]:
     
     # handle top_k override 
     k_cap = TOP_K_OVERRIDE.get(field, TOP_K) # if no override, use default TOP_K
@@ -155,7 +155,7 @@ def _debug_print_field_retrieval(field: str,
 
 
 def _extract_field_from_chunks(field: str,
-                               store: HybridVectorStore,
+                               store: HybridVectorStoreService,
                                llm_service: LLMService
                                ) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
     """Extract a specific field from a list of chunks using the LLM service.

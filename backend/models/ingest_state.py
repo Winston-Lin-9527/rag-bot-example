@@ -10,6 +10,7 @@ class IngestState(TypedDict, total=False):
     file_type: str      # pdf/txt/image
     
     # preprocessing
+    temp_dir: str
     page_image_paths: List[str]
     
     # OCR / Text extract
@@ -19,6 +20,7 @@ class IngestState(TypedDict, total=False):
     # Indexing
     collection_name: str  # in: target collection; defaults to DEFAULT_COLLECTION_NAME
     document_id: str      # in/out: identity within the collection, generated if absent
+    index_key: str        # in/out: identity of the shared vector artifact
     source_name: str      # in: display name for citations; defaults to the filename
     chunks: List[str]
     chunk_metadata: List[Dict[str, Any]]  # metadata for each chunk

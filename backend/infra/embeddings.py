@@ -10,8 +10,8 @@ from config.settings import (
 )
 
 
-class EmbeddingService:
-    _instance: "EmbeddingService | None" = None
+class VectorEmbeddingService:
+    _instance: "VectorEmbeddingService | None" = None
     
     def __init__(self, embedding_model: str | None = None):
         self.client = OpenAI(

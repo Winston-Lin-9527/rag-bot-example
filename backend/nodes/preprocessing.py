@@ -10,6 +10,7 @@ from PIL import Image
 
 from models.ingest_state import IngestState
 from utils.file_utils import pdf_to_images, make_temp_dir
+from utils import progress
 
 
 # ── Image enhancement ────────────────────────────────────────────────────────
@@ -99,11 +100,13 @@ def _xml_to_text(xml_path: str) -> str:
 def preprocess_node(state: IngestState) -> IngestState:
     log = list(state.get("processing_log", []))
     file_type = state["file_type"]
+    progress.post("[Preprocess] Starting document preparation")
 
     # XML: no image pipeline needed
     if file_type == "xml":
         text = _xml_to_text(state["file_path"])
         log.append(f"XML parsed → {len(text)} chars")
+        progress.post(f"[Preprocess] XML parsed ({len(text)} chars)")
         return {
             **state,
             "page_image_paths": [],
@@ -135,8 +138,10 @@ def preprocess_node(state: IngestState) -> IngestState:
         f"Pre-processing: {len(raw_paths)} pages, "
         f"{len(kept_paths)} kept after dedup"
     )
+    progress.post(f"[Preprocess] {len(raw_paths)} pages, {len(kept_paths)} kept after dedup")
     return {
         **state,
+        "temp_dir": tmp,
         "page_image_paths": kept_paths,
         "deduplicated_page_indices": kept_indices,
         "processing_log": log,

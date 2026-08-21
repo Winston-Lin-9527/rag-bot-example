@@ -4,19 +4,20 @@ from pathlib import Path
 from uuid import uuid4
 
 from models.ingest_state import IngestState
-from services.vector_store import HybridVectorStore
+from services.vector_store import HybridVectorStoreService
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from typing import Dict, Tuple, List
 
 from config.settings import CHUNK_SIZE, CHUNK_SIZE_OVERLAP, DEFAULT_COLLECTION_NAME
+from utils import progress
 
 # persistent DB store
 # needs to be used by query node later, not ideal TODO
-_session_store: HybridVectorStore | None = None
+_session_store: HybridVectorStoreService | None = None
 
 
-def get_session_store() -> HybridVectorStore | None:
+def get_session_store() -> HybridVectorStoreService | None:
     return _session_store
 
 
@@ -27,6 +28,10 @@ def _normalize_text(text: str) -> str:
 def _document_hash(text: str) -> str:
     fingerprint_input = f"chunk_size={CHUNK_SIZE};chunk_overlap={CHUNK_SIZE_OVERLAP};{text}"
     return hashlib.sha256(fingerprint_input.encode("utf-8")).hexdigest()
+
+
+def index_key_for_document_hash(document_hash: str) -> str:
+    return document_hash
 
 
 def find_page_numbers_for_chunk(chunk: str, raw_text_by_page: Dict[int, str]) -> Tuple[int, List[int]]:
@@ -61,12 +66,14 @@ def find_page_numbers_for_chunk(chunk: str, raw_text_by_page: Dict[int, str]) ->
 
 def indexing_node(state: IngestState) -> IngestState:
     log = list(state.get("processing_log", []))
+    progress.post("[Indexing] Preparing chunks")
     
     print("Indexing node invoked. Current state:", state)
 
     # Skip indexing if full text is not available
     if not state.get("full_text"):
         log.append("Indexing skipped – no full text available")
+        progress.post("[Indexing] Skipped: no full text available")
         return {**state, "processing_log": log, "current_step": "completed"}
     
     text = state["full_text"]
@@ -106,27 +113,29 @@ def indexing_node(state: IngestState) -> IngestState:
     # getting a collection of its own.
     collection_name = state.get("collection_name") or DEFAULT_COLLECTION_NAME
     document_hash = _document_hash(text)
+    index_key = state.get("index_key") or index_key_for_document_hash(document_hash)
 
     # create the session store and add the chunks with metadata
     global _session_store
-    _session_store = HybridVectorStore(collection_name=collection_name)
+    _session_store = HybridVectorStoreService(collection_name=collection_name)
 
     # Generate an app-level document identity when the caller did not provide
     # one. If this exact version is already indexed, reuse its stored id so the
     # reported id still points at real chunks.
     document_id = (
         state.get("document_id")
-        or _session_store.document_id_for_hash(document_hash)
         or uuid4().hex
     )
-    was_indexed = _session_store.add_document(chunks, chunk_metadata, document_hash, document_id)
+    was_indexed = _session_store.add_index(chunks, chunk_metadata, document_hash, index_key, document_id)
 
     log.append("Indexing completed" if was_indexed else "Indexing skipped – document already indexed")
+    progress.post("[Indexing] Indexed chunks" if was_indexed else "[Indexing] Reused existing index")
     return {**state,
             "chunks": chunks,
             "chunk_metadata": chunk_metadata,
             "index_ready": True,
             "document_id": document_id,
+            "index_key": index_key,
             "document_hash": document_hash,
             "current_step": "completed",
             "processing_log": log

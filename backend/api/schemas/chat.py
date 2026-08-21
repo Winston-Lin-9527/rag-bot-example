@@ -26,10 +26,12 @@ class ReferencedChunk(BaseModel):
     chunk: str
     chunk_id: str | None = None
     document_id: str | None = None
+    index_key: str | None = None
     chunk_index: Any = None
     page_numbers: list[int]
     source_path: str
     source_name: str
+    source_names: list[str] = Field(default_factory=list)
     rrf_score: float
     bm25_rank: int | None = None
     dense_rank: int | None = None

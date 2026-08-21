@@ -12,15 +12,15 @@ see `search()` for why both of those matter.
 from typing import Any, Dict, List, Sequence
 
 from config.settings import CHROMA_COLLECTION_PREFIX, RRF_K, TOP_K
-from services.chroma import get_chroma_client
-from services.embeddings import EmbeddingService
+from infra.chroma import get_chroma_client
+from infra.embeddings import VectorEmbeddingService
 
 from rank_bm25 import BM25Okapi
 from chromadb import Documents, EmbeddingFunction, Embeddings
 
 # a thin adapter that translates our generic embedding capability into the shape one specific consumer (Chroma) expects.
 class _ChromaEmbeddingAdapter(EmbeddingFunction):
-    def __init__(self, embedding_service: EmbeddingService):
+    def __init__(self, embedding_service: VectorEmbeddingService):
         assert embedding_service is not None, "embedding_service must be provided"
         self.embedding_service = embedding_service
 
@@ -28,66 +28,60 @@ class _ChromaEmbeddingAdapter(EmbeddingFunction):
         return self.embedding_service.encode(list(input)).tolist()
 
 
-def _chroma_filter_primitive(document_ids: Sequence[str] | None) -> Dict[str, Any] | None:
-    """Chroma `where` selecting a subset of documents, or None for the whole collection."""
-    if not document_ids:
+def _chroma_filter_primitive(index_keys: Sequence[str] | None) -> Dict[str, Any] | None:
+    """Chroma `where` selecting shared index artifacts."""
+    if not index_keys:
         return None
-    return {"document_id": {"$in": list(document_ids)}}
+    return {"index_key": {"$in": list(index_keys)}}
 
 
-class HybridVectorStore:
-    def __init__(self, collection_name: str):
-        self._embedding_service = EmbeddingService.get_instance()
+class HybridVectorStoreService:
+    def __init__(self, collection_name: str, require_embeddings: bool = True):
+        self._embedding_service = VectorEmbeddingService.get_instance() if require_embeddings else None
         self._chroma_client = get_chroma_client()
+        embedding_function = (
+            _ChromaEmbeddingAdapter(self._embedding_service)
+            if self._embedding_service is not None
+            else None
+        )
         self._chroma_collection = self._chroma_client.get_or_create_collection(
             name=f"{CHROMA_COLLECTION_PREFIX}{collection_name}",
-            embedding_function=_ChromaEmbeddingAdapter(self._embedding_service), # so that when we upsert, the collection will automatically call this adapter to get embeddings for the chunks
+            embedding_function=embedding_function,
             metadata={"hnsw:space": "cosine"}
         )
 
     # ---------------------------------------------------------------- writing
 
-    def has_document(self, document_hash: str) -> bool:
-        """Is this exact version of a document already indexed here?
+    def has_index(self, index_key: str) -> bool:
+        """Is this shared vector artifact already indexed here?
 
         A `where` lookup rather than a scan of loaded metadata: the answer is one
         row, so there is no reason to pull the collection into memory for it.
         """
         hit = self._chroma_collection.get(
-            where={"document_hash": document_hash}, limit=1, include=[]
+            where={"index_key": index_key}, limit=1, include=[]
         )
         return bool(hit["ids"])
 
-    def document_id_for_hash(self, document_hash: str) -> str | None:
-        """Return the stored document id for this exact indexed version, if any."""
-        hit = self._chroma_collection.get(
-            where={"document_hash": document_hash}, limit=1, include=["metadatas"]
-        )
-        metadatas = hit.get("metadatas") or []
-        if not metadatas:
-            return None
-
-        document_id = str((metadatas[0] or {}).get("document_id") or "")
-        return document_id or None
-
-    def add_document(
+    def add_index(
         self,
         chunks: List[str],
         metadata: List[Dict[str, Any]],
         document_hash: str,
+        index_key: str,
         document_id: str,
     ) -> bool:
-        """Add one document to the collection, leaving every other document alone.
+        """Add one shared vector artifact to the collection.
 
         Returns False if this exact version is already present. Note this asks
         whether the hash is *among* those indexed, not whether it is the only one
         — the latter is what forced the old reset()-on-mismatch behaviour that
         kept a collection single-document.
         """
-        if self.has_document(document_hash):
+        if self.has_index(index_key):
             return False  # already indexed at this version, nothing to re-embed
 
-        self._index_document(chunks, metadata, document_hash, document_id)
+        self._index_document(chunks, metadata, document_hash, index_key, document_id)
         return True
 
     def _index_document(
@@ -95,6 +89,7 @@ class HybridVectorStore:
             chunks: List[str],
             metadata: List[Dict[str, Any]],
             document_hash: str,
+            index_key: str,
             document_id: str,
         ) -> None:
         """internal method
@@ -108,6 +103,12 @@ class HybridVectorStore:
         if not document_id:
             raise ValueError("document_id must be provided so chunks can be filtered on")
 
+        if not index_key:
+            raise ValueError("index_key must be provided so shared chunks can be filtered on")
+
+        if self._embedding_service is None:
+            raise RuntimeError("Embeddings are required to index chunks")
+
         # Already collection-unique, which is what makes it usable as the fusion
         # key in search(). chunk_index is not: it restarts at 0 per document.
         ids = [f"{document_hash}:chunk_{i}" for i in range(len(chunks))]
@@ -119,6 +120,7 @@ class HybridVectorStore:
                 **meta,
                 "chunk_index": i,  # ordinal within this document, for display only
                 "document_hash": document_hash,
+                "index_key": index_key,
                 "document_id": document_id,
             }
             for i, meta in enumerate(metadata)
@@ -131,33 +133,22 @@ class HybridVectorStore:
             metadatas=metadatas
         )
 
-    def remove_document(self, document_id: str) -> None:
-        """Drop one document's chunks, leaving the rest of the collection intact."""
-        self._chroma_collection.delete(where={"document_id": document_id})
+    def remove_index(self, index_key: str) -> None:
+        """Drop one shared vector artifact, leaving the rest of the collection intact."""
+        self._chroma_collection.delete(where={"index_key": index_key})
 
-    def list_documents(self) -> List[Dict[str, Any]]:
-        """Distinct documents in this collection, for pickers and filter UIs.
+    def count_index_chunks(self, index_key: str) -> int:
+        result = self._chroma_collection.get(where={"index_key": index_key}, include=[])
+        return len(result.get("ids") or [])
 
-        Chroma has no DISTINCT, so this folds every chunk's metadata — and
-        `include=["metadatas"]` drags along the page_text copy on each one. Fine
-        at current scale, but this is a derived view: once documents have their
-        own table, read them from there and treat this as a reconcile tool.
-        """
+    def list_index_keys(self) -> List[str]:
         result = self._chroma_collection.get(include=["metadatas"])
-        documents: Dict[str, Dict[str, Any]] = {}
-
-        for meta in result["metadatas"]:
-            document_id = str(meta["document_id"])
-            entry = documents.setdefault(document_id, {
-                "document_id": document_id,
-                "document_hash": str(meta["document_hash"]),
-                "source_name": str(meta["source_name"]),
-                "source_path": str(meta["source_path"]),
-                "chunk_count": 0,
-            })
-            entry["chunk_count"] += 1
-
-        return sorted(documents.values(), key=lambda d: (d["source_name"], d["document_id"]))
+        keys = {
+            str(metadata.get("index_key"))
+            for metadata in result.get("metadatas") or []
+            if metadata and metadata.get("index_key")
+        }
+        return sorted(keys)
 
     def reset(self) -> None:
         """Clear the entire collection. No longer part of the add path."""
@@ -171,9 +162,9 @@ class HybridVectorStore:
         self,
         query: str,
         top_k: int = TOP_K,
-        document_ids: Sequence[str] | None = None,
+        index_keys: Sequence[str] | None = None,
     ) -> List[Dict[str, Any]]:
-        """Hybrid search, optionally scoped to a subset of documents.
+        """Hybrid search, optionally scoped to a subset of shared index artifacts.
 
         Both halves fuse on the Chroma chunk id, which is unique across the
         collection. The previous version fused BM25's list position against the
@@ -181,7 +172,7 @@ class HybridVectorStore:
         collection holds one document, and silently return the wrong chunk once
         it holds two.
         """
-        where = _chroma_filter_primitive(document_ids)
+        where = _chroma_filter_primitive(index_keys)
 
         # ------method 1: BM25 Sparse search------
         # BM25 scores against a corpus it holds in memory, so unlike the dense

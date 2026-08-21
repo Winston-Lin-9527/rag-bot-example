@@ -10,6 +10,7 @@ ChatMessage = HumanMessage | AIMessage
 class Citation(TypedDict):
     page_number: int
     document_id: str  # a collection holds many contracts; "page 7" alone is ambiguous
+    index_key: str
     source_path: str
     excerpt: str
 
@@ -18,6 +19,7 @@ class RetrievedEvidence(TypedDict):
     chunk: str
     chunk_id: str      # the store's collection-unique id, from HybridVectorStore.search
     document_id: str   # which document in the collection this came from
+    index_key: str     # shared vector artifact identity
     metadata: Dict[str, Any]
     page_number: int
     page_numbers: List[int]
