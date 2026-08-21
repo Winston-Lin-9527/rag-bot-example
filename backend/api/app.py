@@ -15,7 +15,7 @@ from services.jobs import startup as jobs_startup
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="Contract Reviewer Q&A")
+    app = FastAPI(title="Policy & Contract Reviewer")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],

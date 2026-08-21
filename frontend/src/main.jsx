@@ -123,7 +123,7 @@ function App() {
       <section className="chat-panel" aria-label="Contract chat">
         <header className="topbar">
           <div>
-            <p className="eyebrow">Contract Q&A</p>
+            <p className="eyebrow">Policy & Contract Q&A</p>
             <h1>Chat</h1>
           </div>
           <label className="collection-field">
